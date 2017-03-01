@@ -1,0 +1,7 @@
+{application, chine,
+ [{description, "Tiny stack machine assembler"},
+  {vsn, git},
+  {registered, []},
+  {env, []},
+  {applications,[kernel,stdlib]}
+  ]}.
