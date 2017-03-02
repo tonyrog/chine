@@ -14,55 +14,56 @@
 
 -include("../include/chine.hrl").
 
+-define(OPCODE(X), (#opcode.X-2)).
+-define(ENUM(X), X => (#opcode.X-2)).
+-define(MAP(X,Y), X => (#opcode.Y-2)).
+
 opcodes() ->
     #{ 
        %% op:3
-       'zbranch.h' => ?ZBRAN_H,
-       'lit.h' => ?LIT_H,
-       'dup' => ?DUP,
-       'rot' => ?ROT,
-       'over' => ?OVER,
-       'drop' => ?DROP,
-       'swap' => ?SWAP,
-       '-' => ?SUB,
+       ?ENUM('zbranch.h'),
+       ?ENUM('literal.h'),
+       ?ENUM(dup),
+       ?ENUM(rot),
+       ?ENUM(over),
+       ?ENUM(drop),
+       ?ENUM(swap),
+       ?ENUM('-'),
        %% op:4
-       '+' => ?ADD,
-       '*' => ?MUL,
-       'and' => ?AND,
-       'or' => ?OR,
-       '0='  => ?ZEQ,
-       '0<'  => ?ZLT,
-       'not' => ?NOT,
-
+       ?ENUM('+'),
+       ?ENUM('*'),
+       ?ENUM(negate),
+       ?ENUM('and'),
+       ?ENUM('or'),
+       ?ENUM('0='),
+       ?ENUM('0<'),
+       ?ENUM('not'),
        %% op:7
-       'u<'  => ?ULT,
-       'u<=' => ?ULTE,
-       'lshift'  => ?BSL,
-       'rshift'  => ?BSR,
-       'arshift'  => ?ASR,
-       '/' => ?DIV,
-       'mod' => ?MOD,
-       'xor' => ?XOR,
-       'negate' => ?NEG,
-       'invert' => ?INV,
-       '!' => ?STORE,
-       '@' => ?FETCH,
-       'nop' => ?NOP,
-       ';' => ?RET,
-
-       'literal.b' => ?LIT_B,
-       'literal.w' => ?LIT_W,
-       'literal.l' => ?LIT_L,
-       'branch.b' => ?BRAN_B,
-       'branch.w' => ?BRAN_W,
-       'zbranch.b' => ?ZBRAN_B,
-       'zbranch.w' => ?ZBRAN_W,
-       'ibranch.b' => ?IBRAN_B,
-       'ibranch.w' => ?IBRAN_W,
-       'call.b' => ?CALL_B,
-       'call.w' => ?CALL_W,
-       'sys.b' => ?SYS_B,
-       'exit' => ?EXIT
+       ?ENUM('u<'),
+       ?ENUM('u<='),
+       ?ENUM('lshift'),
+       ?ENUM('rshift'),
+       ?ENUM('/'),
+       ?ENUM('xor'),
+       ?ENUM('invert'),
+       ?ENUM('!'),
+       ?ENUM('@'),
+       ?ENUM('nop'),
+       ?ENUM('ret'),
+       ?MAP('literal.b', 'literal.h'),
+       ?ENUM('literal.w'),
+       ?ENUM('literal.l'),
+       ?ENUM('branch.b'),
+       ?ENUM('branch.w'),
+       ?MAP('zbranch.b', 'zbranch.h'),
+       ?ENUM('zbranch.w'),
+       ?ENUM('ibranch.b'),
+       ?ENUM('ibranch.w'),
+       ?ENUM('call.b'),
+       ?ENUM('call.w'),
+       ?ENUM('sys.b'),
+       ?ENUM('exit'),
+       ?ENUM('yield')
      }.
 
 %% not real opcodes, they are expanded like macros
@@ -75,10 +76,45 @@ synthetic_opcodes() ->
        '<='  => ['-', '1-', '0<'],
        '>='  => [swap,'-','1-','0<'],
        '='   => ['-', '0='],
+       '<>'  => ['-', 'not'],
+       'u>'  => [swap, 'u<'],
+       'u>=' => [swap, 'u<='],
+       '0<>' => ['0=', 'not'],
+       '0>'  => [{const,0},'>'],
        'setbit' => [{const,1},swap,lshift,'or'],
        'clrbit' => [{const,1},swap,lshift,invert,'and'],
        'togglebit' => [{const,1},swap,lshift,'xor'],
-       'tstbit'    => [{const,1},swap,lshift,'and']
+       'tstbit'    => [{const,1},swap,lshift,'and'],
+       'setclrbit' => [{'if',[setbit],[clrbit]}],
+       'abs'       => [dup,'0<',{'if',[negate]}],
+       'min'       => [over,over,'<',{'if',[drop],[swap,drop]}],
+       'max'       => [over,over,'<',{'if',[swap,drop],[drop]}],
+       'nip'       => [swap,drop],
+       'tuck'      => [swap,over],
+       '-rot'      => [rot,rot],
+       '2drop'     => [drop,drop],
+       '2dup'      => [over,over],
+       '2*'        => [dup,'+'],
+       '2/'        => [{const,1},arshift],
+       'sqr'       => [dup,'*'],
+       'mod'       => ['2dup','/','*','-'],
+       'arshift'   => [dup,{const,32},swap,'-',
+		       {const,-1},swap,lshift,
+		       '-rot', rshift, 'or'],
+       %% sys interface
+       'param@'    => [{sys,'param@'}],
+       'param!'    => [{sys,'param!'}],
+       'timer_init' => [{sys,timer_init}],
+       'timer_start' => [{sys,timer_start}],
+       'timer_stop' => [{sys,timer_stop}],
+       'timer_timeout' => [{sys,timer_timeout}],
+       'timer_running' => [{sys,timer_running}],
+       'input@' => [{sys,'input@'}],
+       'select_timer' => [{sys,select_timer}],
+       'select_input' => [{sys,select_input}],
+       'emit' => [{sys,emit}],
+       'key' => [{sys,key}],
+       'key?' => [{sys,'key?'}]
      }.
 
 asm_file(File) ->
@@ -87,7 +123,8 @@ asm_file(File) ->
 
 asm(Code) ->
     io:format("CODE = ~w\n", [Code]),
-    Code1 = encode_const(Code),     %% generate byte code for constants
+    Code0 = expand_synthetic(Code),
+    Code1 = encode_const(Code0),     %% generate byte code for constants
     io:format("CODE1 = ~w\n", [Code1]),
     Code2 = collect_blocks(Code1),  %% collect basic blocks
     io:format("CODE2 = ~w\n", [Code2]),
@@ -97,6 +134,33 @@ asm(Code) ->
     io:format("CODE5 = ~w\n", [Code4]),
     encode_opcodes(Code4).
 
+expand_synthetic(Code) ->
+    lists:flatten(expand_synth_(Code)).
+
+expand_synth_([{'if',Then}|Code]) ->
+    L = new_label(),
+    [{zbranch,L}, expand_synth_(Then), {label,L} | expand_synth_(Code)];
+expand_synth_([{'if',Then,Else}|Code]) ->
+    L0 = new_label(),
+    L1 = new_label(),
+    [{zbranch,L0}, expand_synth_(Then),{branch,L1},
+     {label,L0}, expand_synth_(Else),{label,L1} | 
+     expand_synth_(Code)];
+expand_synth_([Op|Code]) when is_tuple(Op) ->
+    [Op | expand_synth_(Code)];
+expand_synth_([Op|Code]) when is_atom(Op) ->
+    Map = synthetic_opcodes(),
+    case maps:find(Op,Map) of
+	error ->
+	    [Op|expand_synth_(Code)];
+	{ok,Ops} when is_list(Ops) ->
+	    [expand_synth_(Ops)|expand_synth_(Code)]
+    end;
+expand_synth_([Ops|Code]) when is_list(Ops) ->
+    [expand_synth_(Ops)|expand_synth_(Code)];
+expand_synth_([]) ->
+    [].
+    
 %%
 %% Replace branch labels with offsets
 %% iterate until all labels are resolved
@@ -394,7 +458,7 @@ collect_blocks_([Op1|Code1=[Op2|Code2]], Block, Acc)
     Map = opcodes(),
     N3 = maps:get(Op1, Map),
     N4 = maps:get(Op2, Map),
-    if N3 < 8, N4 < 16 ->
+    if N3 < 8, N4 > 1, N4 < 16 ->
 	    collect_blocks_(Code2, [{Op1,Op2}|Block], Acc);
        true ->
 	    collect_blocks_(Code1, [Op1|Block], Acc)
@@ -492,11 +556,14 @@ encode_const_([{sys, SysOp}|Code], Acc) ->
 	      timer_timeout -> ?SYS_TIMER_TIMEOUT;
 	      timer_running -> ?SYS_TIMER_RUNNING;
 	      'input@' -> ?SYS_INPUT_FETCH;
-	      select -> ?SYS_SELECT;
+	      select_timer -> ?SYS_SELECT_TIMER;
+	      select_input -> ?SYS_SELECT_TIMER;
+	      deselect_all -> ?SYS_DESELECT_ALL;
 	      emit -> ?SYS_EMIT;
-	      key -> ?SYS_KEY
+	      key -> ?SYS_KEY;
+	      'key?' -> ?SYS_QKEY
 	  end,
-    encode_const_(Code, [Sys,?SYS_B|Acc]);
+    encode_const_(Code, [Sys,?OPCODE('sys.b')|Acc]);
 encode_const_([C|Code],Acc) ->
     encode_const_(Code, [C|Acc]);
 encode_const_([],Acc) ->
@@ -537,9 +604,9 @@ encode_opcodes_([Op|Code], Acc, Map) when
       is_integer(Op), Op >= 0, Op =< 255 ->
     encode_opcodes_(Code,[Op|Acc],Map);
 encode_opcodes_([{'literal.h',I4}|Code], Acc, Map) ->
-    encode_opcodes_(Code,[?OPCODE2(?LIT_H,I4)|Acc],Map);
+    encode_opcodes_(Code,[?OPCODE2(?OPCODE('literal.h'),I4)|Acc],Map);
 encode_opcodes_([{'zbranch.h',I4}|Code], Acc, Map) ->
-    encode_opcodes_(Code,[?OPCODE2(?ZBRAN_H,I4)|Acc],Map);
+    encode_opcodes_(Code,[?OPCODE2(?OPCODE('zbranch.h'),I4)|Acc],Map);
 encode_opcodes_([{Op3,Op4}|Code], Acc, Map) ->
     N3 = maps:get(Op3,Map),
     N4 = maps:get(Op4,Map),
@@ -638,14 +705,12 @@ exec_('0=',[A|Xs])     -> [{'0=',A}|Xs];
 exec_('0<',[A|Xs])     -> [{'0<',A}|Xs];
 exec_('not',[A|Xs])    -> [{'not',A}|Xs];
 exec_('/',[B,A|Xs])   -> [{'/',A,B}|Xs];
-exec_('mod',[B,A|Xs])   -> [{'mod',A,B}|Xs];
 exec_('xor',[A,A|Xs])   -> [{const,0}|Xs];
 exec_('xor',[B,A|Xs])   -> [{'xor',A,B}|Xs];
 exec_('negate',[A|Xs])    -> [{'negate',A}|Xs];
 exec_('invert',[A|Xs])    -> [{'invert',A}|Xs];
-exec_('<<',[B,A|Xs])    -> [{'<<',A,B}|Xs];
-exec_('>>',[B,A|Xs])    -> [{'>>',A,B}|Xs];
-exec_('>>a',[B,A|Xs])    -> [{'>>a',A,B}|Xs];
+exec_('lshift',[B,A|Xs])    -> [{'<<',A,B}|Xs];
+exec_('rshift',[B,A|Xs])    -> [{'>>',A,B}|Xs];
 exec_(nop, Xs)         -> Xs;
 exec_({const,C},Xs) -> [C|Xs].
 
@@ -685,13 +750,11 @@ min_depth_('0=')  -> {1,1};
 min_depth_('0<')  -> {1,1};
 min_depth_('not') -> {1,1};
 min_depth_('/')   -> {2,1};
-min_depth_('mod') -> {2,1};
 min_depth_('xor')  -> {2,1};
 min_depth_('negate') -> {1,1};
 min_depth_('invert') -> {1,1};
-min_depth_('<<')  -> {2,1};
-min_depth_('>>')  -> {2,1};
-min_depth_('>>a')  -> {2,1};
+min_depth_('lshift')  -> {2,1};
+min_depth_('rshift')  -> {2,1};
 min_depth_('1+') -> {1,1};
 min_depth_('1-') -> {1,1};
 min_depth_('u<')  -> {2,1};
@@ -701,5 +764,5 @@ min_depth_('@')  -> {1,1};
 min_depth_('nop') -> {0,0};
 min_depth_('<=') -> {2,1};
 min_depth_('u<=') -> {2,1};
-min_depth_(';') -> {0,0};
+min_depth_('ret') -> {0,0};
 min_depth_({const,_C}) -> {0,1}.

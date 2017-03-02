@@ -7,29 +7,44 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define MAX_INPUT  32
 #define MAX_STACK  16
 #define MAX_RSTACK 4
 #define MAX_MEM    16
 #define MAX_TIMERS 8
-#define NUM_TBITS  ((MAX_TIMERS+7)>>3)
+#define NUM_TBYTES  ((MAX_TIMERS+7)>>3)
+#define NUM_IBYTES  ((MAX_INPUT+7)>>3)
+
+typedef int32_t  cell_t;
+typedef uint32_t ucell_t;
+typedef uint32_t timeout_t;
 
 #define SETBIT(v,i) (v)[(i)>>3] |= (1 << ((i) & 7))
 #define CLRBIT(v,i) (v)[(i)>>3] &= ~(1 << ((i) & 7))
 #define TSTBIT(v,i) ((v)[(i)>>3] & (1 << ((i) & 7)))
 
+#define U32(x) ((uint32_t)(x))
+#define U16(x) ((uint16_t)(x))
+#define U8(x)  ((uint8_t)(x))
+
 static inline uint8_t unpack_u8(uint8_t* ptr)
 {
-    return ptr[0];
+    return U8(ptr[0]);
 }
 
 static inline uint16_t unpack_u16(uint8_t* ptr)
 {
-    return (ptr[0]<<8) | ptr[1];
+    return (U16(ptr[0])<<8) | U16(ptr[1]);
 }
 
 static inline uint32_t unpack_u32(uint8_t* ptr)
 {
-    return (ptr[0]<<24) | (ptr[1]<<16) | (ptr[2]<<8) | ptr[3];
+    return (U32(ptr[0])<<24) | (U32(ptr[1])<<16) |
+	(U32(ptr[2])<<8) | U32(ptr[3]);
 }
 
 static inline int8_t unpack_i8(uint8_t* ptr)
@@ -54,59 +69,54 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define INT16(ptr)  unpack_i16((ptr))
 #define INT32(ptr)  unpack_i32((ptr))
 
-
 #define OPCODE1(a)    ((a) & 0x7f)
 #define OPCODE2(a,b)  (0x80|(((b)&15)<<3)|((a)&7))
 
 
-// op3 : first part of OPCODE2 also an OPCODE1
-#define ZBRAN_H     0  // either 4 or 8 bits offset
-#define LIT_H       1  // const: ( -- x ) either 4 or 8 bits
-#define DUP         2  // dup ( a -- a a )
-#define ROT         3  // rot ( a b c  -- b c a )  ( down )
-#define OVER        4  // over ( a b -- b a )
-#define DROP        5  // drop ( a -- )
-#define SWAP        6  // swap ( a b -- b a )
-#define SUB         7   // - ( a b -- [ a-b ] )
-
-// op4 : second part of OPCODE2 also an OPCODE1
-#define ADD         8   // +  ( x1 x2 -- (x1+x2) )
-#define MUL         9   // *: ( x1 x2 -- (x1*x2) )
-#define EQ          10  // =: ( a b -- ( a==b) )
-#define AND         11  // and: ( a b -- (a&b) )
-#define OR          12  // or: ( a b -- (a|b) )
-#define ZEQ         13  // 0=:  ( a -- (a==0) )
-#define ZLT         14  // 0<:  ( a -- (a<0) )
-#define NOT         15  // not: ( a -- not a)
-
-// op7 : reset of opcodes 
-#define DIV         16  // ( a b -- (a/b) )
-#define MOD         17  // ( a b -- (a%b) )
-#define XOR         18  // ( a b -- (a^b) )
-#define NEG         19  // ( a -- (-a) )
-#define INV         20  // ( a -- (~a) )
-#define BSL         21  // lshift: ( a n -- (a << n) )
-#define BSR         22  // rshift: ( a n -- (a >> n) )
-#define ASR         23  // arshift: ( a n -- (a >> n) )
-#define ULT         24  // u<: ( a b -- (a < b) )
-#define STORE       25  // ( a i -- )
-#define FETCH       26  // ( i -- a )
-#define NOP         27  // nop: ( -- )
-#define ULTE        28  // u<= ( a b -- [a<=b] ) '-' '1-' '0<'
-#define RET         29  // ( -- ) R: ( addr -- )
-#define LIT_W       30  // ( -- w )
-#define LIT_L       31  // ( -- l )
-#define BRAN_B      32  // ( -- )
-#define BRAN_W      33  // ( -- )
-#define ZBRAN_W     34  // ( cond -- )
-#define IBRAN_B     35  // ( i -- )
-#define IBRAN_W     36  // ( i -- )
-#define CALL_B      37 // ( -- ) R: ( -- addr )
-#define CALL_W      38  // ( -- ) R: ( -- addr )
-#define SYS_B       39  // sys ( x1 .. xn -- y1 )
-
-#define EXIT        40  // ( -- )  - fixme
-#define YIELD       41  // ( -- )
+typedef enum {
+    // op3 : first part of OPCODE2 also an OPCODE1
+    ZBRAN_H=0,  // either 4 or 8 bits offset
+    LIT_H,      // const: ( -- x ) either 4 or 8 bits
+    DUP,        // dup ( a -- a a )
+    ROT,        // rot ( a b c  -- b c a )  ( down )
+    OVER,       // over ( a b -- b a )
+    DROP,       // drop ( a -- )
+    SWAP,       // swap ( a b -- b a )
+    SUB,        // - ( a b -- [ a-b ] )
+    // op4 : second part of OPCODE2 also an OPCODE1
+    ADD,        // +  ( x1 x2 -- (x1+x2) )
+    MUL,        // *: ( x1 x2 -- (x1*x2) )
+    NEG,        // ( a -- (-a) )
+    AND,        // and: ( a b -- (a&b) )
+    OR,         // or: ( a b -- (a|b) )
+    ZEQ,        // 0=:  ( a -- (a==0) )
+    ZLT,        // 0<:  ( a -- (a<0) )
+    NOT,        // not: ( a -- not a)
+    // op7 : reset of opcodes 
+    NOP,        // nop: ( -- )
+    ULT,        // u<: ( a b -- (a < b) )
+    ULTE,       // u<= ( a b -- [a<=b] ) '-' '1-' '0<'
+    XOR,        // ( a b -- (a^b) )
+    DIV,        // ( a b -- (a/b) )
+    INV,        // ( a -- (~a) )
+    BSL,        // lshift: ( a u -- (a << u) )
+    BSR,        // rshift: ( a u -- (a >> u) )
+    STORE,      // ( a i -- )
+    FETCH,      // ( i -- a )
+    RET,        // ( -- ) R: ( addr -- )
+    LIT_W,      // ( -- w )
+    LIT_L,      // ( -- l )
+    BRAN_B,     // ( -- )
+    BRAN_W,     // ( -- )
+    ZBRAN_W,    // ( cond -- )
+    IBRAN_B,    // ( i -- )
+    IBRAN_W,    // ( i -- )
+    CALL_B,     // ( -- ) R: ( -- addr )
+    CALL_W,     // ( -- ) R: ( -- addr )
+    SYS_B,      // sys ( x1 .. xn -- y1 )
+    EXIT,       // ( -- )
+    YIELD,      // ( -- )
+} opcode_t;
 
 #define S_PUSH(x)     OPCODE2(LIT_H,(x))
 
@@ -114,15 +124,15 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define LIT_B         LIT_H
 #define ZBRAN_B       ZBRAN_H
 
-#define INC S_PUSH(1), ADD
-#define DEC S_PUSH(1), SUB
-#define LT  SUB, ZLT
-#define ABS DUP, ZLT, ZBRAN_B,1,NEG
-#define MIN OVER,OVER,LT,ZBRAN_B,3,DROP,BRAN_B,2,SWAP,DROP
-#define MAX OVER,OVER,LT,ZBRAN_B,4,SWAP,DROP,BRAN_B,1,DROP
-
-
-
+#define S_INC S_PUSH(1), ADD
+#define S_DEC S_PUSH(1), SUB
+#define S_LT  SUB, ZLT
+#define S_ABS DUP, ZLT, ZBRAN_B,1,NEG
+#define S_MIN OVER,OVER,S_LT,ZBRAN_B,3,DROP,BRAN_B,2,SWAP,DROP
+#define S_MAX OVER,OVER,S_LT,ZBRAN_B,4,SWAP,DROP,BRAN_B,1,DROP
+#define S_EQ  SUB, ZEQ
+#define S_MOD OVER, OVER, DIV, MUL, SUB
+#define S_ASR DUP,LIT_B,32,SWAP,SUB,S_PUSH(-1),SWAP,BSL,ROT,ROT,BSR,OR
 // Failure codes
 #define FAIL_STACK_OVERFLOW    -1
 #define FAIL_STACK_UNDERFLOW   -2
@@ -143,9 +153,13 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define SYS_TIMER_TIMEOUT 6  // ( i -- f )
 #define SYS_TIMER_RUNNING 7  // ( i -- f )
 #define SYS_INPUT_FETCH   8  // ( i k -- n )
-#define SYS_SELECT        9  // ( tmask imask -- )
-#define SYS_EMIT         10  // ( c -- )     tx character on default uart
-#define SYS_KEY          11  // (   -- c )   rx character from uart or -1
+#define SYS_SELECT_TIMER  9  // ( i -- )
+#define SYS_SELECT_INPUT 10  // ( i -- )
+#define SYS_DESELECT_ALL 11  // ( -- )
+#define SYS_EMIT         12  // ( c -- )     tx character on default uart
+#define SYS_KEY          13  // (   -- c )   rx character from uart or -1
+#define SYS_QKEY         14  // (   -- f )   1 if char is read 0 otherwise
+
 // LED interface set_led / clr_led
 // CAN interface send message
 
@@ -154,30 +168,56 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define INPUT_ANALOG  1
 #define INPUT_ENCODER 2
 
+// Program normally should look something like
+// {ibranch, [Main,Init,Final]}
+// {branch, Fail}
+// {label,Init}
+//   <init code>
+//   ret
+// {label,Final
+//   <cleanup code>
+//   ret
+// {label,Main}
+//   <main code>
+//
+// If Init/Final are missing then:
+// zbranch, Main,
+// ret
+// {label,Main}
+//   <main code>
+//
+
 typedef struct _chine_t
 {
-    uint8_t* IP;
-    int32_t* SP;
-    int32_t* RP;
-    uint32_t imask;   // current input mask
-    uint32_t tmask;   // active timers mask
-    int32_t  err;     // last system error
-    int32_t  (*sys)(struct _chine_t* mp,
-		    int32_t sysop, int32_t* revarg,
-		    int32_t* npop, int32_t* reason);
-    uint8_t*  prog;               // program area
-    int32_t  stack[MAX_STACK];    // stack 
-    int32_t  rstack[MAX_RSTACK];  // call stack
-    int32_t  mem[MAX_MEM];        // local store
-    uint8_t  tbits[NUM_TBITS];    // timer on/off bits
+    uint8_t* cIP;
+    cell_t*  cSP;
+    cell_t*  cRP;
+    cell_t   cErr;     // last system error
+    cell_t  (*sys)(struct _chine_t* mp,
+		   cell_t sysop, cell_t* revarg,
+		   cell_t* npop, cell_t* reason);
+    uint8_t* prog;                // program area
+    cell_t   stack[MAX_STACK];    // stack
+    cell_t   rstack[MAX_RSTACK];  // call stack (relative addresses etc)
+    cell_t   mem[MAX_MEM];        // local store
+    uint8_t  imask[NUM_IBYTES];   // input mask
+    uint8_t  tbits[NUM_TBYTES];   // timer running bits
+    uint8_t  tmask[NUM_TBYTES];   // selected timers
     uint32_t timer[MAX_TIMERS];   // timers
 } chine_t;
 
 extern void chine_init(chine_t* mp, uint8_t* prog, 
 		       int32_t  (*sys)(chine_t* mp,
-				       int32_t sysop, int32_t* revarg,
-				       int32_t* npop, int32_t* reason));
+				       cell_t sysop, cell_t* revarg,
+				       cell_t* npop, cell_t* reason));
 extern int chine_run(chine_t* mp);
-extern int chine_next(chine_t** mpv, size_t n, int32_t* tmop, uint32_t* imaskp);
+extern timeout_t chine_millis(void);
+extern timeout_t chine_micros(void);
+extern int chine_next(chine_t** mpv, size_t n,
+		      timeout_t* tmop, uint8_t* imask);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

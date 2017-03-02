@@ -21,7 +21,7 @@ swap		SWAP	( a b -- b a )
 
 +		ADD	( a b -- [ a+b ] )
 *		MUL    	( a b -- [ a*b )
-=		EQ      ( a b -- [ a==b ]
+negate		NEG     ( a -- [ -a ] )
 and		AND     ( a b -- [ a&b ] )
 or		OR      ( a b -- [ a|b ] )
 0=		ZEQ     ( a -- [ a==0 ] )
@@ -33,9 +33,7 @@ not       	NOT	( a -- [ !a ] )
 ###############################
 
 /		DIV     ( a b -- [ a/b ] )
-mod		MOD     ( a b -- [ a%b ] )
 xor		XOR     ( a b -- [ a^b ] )
-negate		NEG     ( a -- [ -a ] )
 invert		INV     ( a -- [ ~a ] )
 <<		BSL     ( a n -- [ (uint)a << n] )
 >>		BSR     ( a n -- [ (uint)a >> n ] )

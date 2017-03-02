@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <memory.h>
 #include <sys/time.h>
 
-#include "../include/chine.h"
+#include "../../include/chine.h"
 
 extern int32_t chine_unix_sys(chine_t* mp,
 			      int32_t sysop, int32_t* revarg,
@@ -21,19 +22,20 @@ int32_t test_code_pop(uint8_t* prog, size_t len)
 again:
     switch(chine_run(&m)) {
     case 0:
-	return m.SP[0];
+	return m.cSP[0];
     case 1: {
-	uint32_t imask = 0;
-	int32_t  tmo = 0;
+	uint8_t  imask[NUM_IBYTES];   // input mask
+	timeout_t tmo = 0;
 	chine_t* mv[1];
 	mv[0] = &m;
-	chine_next(mv, 1, &tmo, &imask);
+	memset(&imask, 0, sizeof(imask));
+	chine_next(mv, 1, &tmo, imask);
 	// printf("tmo = %d, imask = %08x\n", tmo, imask);
 	if (tmo > 0) usleep(tmo*1000);
 	goto again;
     }
     default:
-	printf("fail: err = %d\n", m.err);
+	printf("fail: err = %d\n", m.cErr);
 	break;
     }
     return -1;
@@ -59,7 +61,7 @@ void test_arithmetic()
     uint8_t prog2[] = { LIT_B, 105, LIT_B, 34, SUB, EXIT };
     uint8_t prog3[] = { LIT_B, 105, LIT_B, 34, MUL, EXIT };
     uint8_t prog4[] = { LIT_B, 105, LIT_B, 34, DIV, EXIT };
-    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, MOD, EXIT };
+    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, S_MOD, EXIT };
     uint8_t prog6[] = { LIT_B, 105, LIT_B, 34, AND, EXIT };
     uint8_t prog7[] = { LIT_B, 105, LIT_B, 34, OR, EXIT };
     uint8_t prog8[] = { LIT_B, 105, LIT_B, 34, XOR, EXIT };
@@ -67,7 +69,7 @@ void test_arithmetic()
     uint8_t prog10[] = { LIT_B, 105, INV, EXIT };
     uint8_t prog11[] = { LIT_B, 105,  S_PUSH(2), BSL, EXIT };
     uint8_t prog12[] = { LIT_B, -105, S_PUSH(2), BSR, EXIT };
-    uint8_t prog13[] = { LIT_B, -105, S_PUSH(2), ASR, EXIT };
+    uint8_t prog13[] = { LIT_B, -105, S_PUSH(2), S_ASR, EXIT };
 
     assert(test_code_pop(prog1, sizeof(prog1)) == 139);
     assert(test_code_pop(prog2, sizeof(prog2)) == 71);
@@ -91,7 +93,7 @@ void test_comp()
     uint8_t prog2[] = { S_PUSH(0), ZEQ, EXIT };
     uint8_t prog3[] = { LIT_B, -105, ZLT, EXIT };
     uint8_t prog4[] = { LIT_B, 105, ZLT, EXIT };
-    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, LT, EXIT };
+    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, S_LT, EXIT };
     uint8_t prog6[] = { LIT_B, 105, LIT_B, -34, ULT, EXIT };
     
     assert(test_code_pop(prog1, sizeof(prog1)) == 0);
@@ -104,11 +106,11 @@ void test_comp()
 
 void test_misc()
 {
-    uint8_t prog1[] = { LIT_B, 105, INC, EXIT };
-    uint8_t prog2[] = { LIT_B, 105, DEC, EXIT };
-    uint8_t prog3[] = { LIT_B, -105, ABS, EXIT };
-    uint8_t prog4[] = { LIT_B, 105, LIT_B, 34, MIN, EXIT };
-    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, MAX, EXIT };
+    uint8_t prog1[] = { LIT_B, 105, S_INC, EXIT };
+    uint8_t prog2[] = { LIT_B, 105, S_DEC, EXIT };
+    uint8_t prog3[] = { LIT_B, -105, S_ABS, EXIT };
+    uint8_t prog4[] = { LIT_B, 105, LIT_B, 34, S_MIN, EXIT };
+    uint8_t prog5[] = { LIT_B, 105, LIT_B, 34, S_MAX, EXIT };
     uint8_t prog6[] = { LIT_B, 34, DUP, MUL, EXIT };
     uint8_t prog7[] = { LIT_B, 34, LIT_B, 105, SWAP, EXIT };
 
@@ -174,14 +176,14 @@ void test_call()
 			DUP,  // ( n -- r n )
 			// LOOP
 			S_PUSH(1), SUB, // ( r n -- r n-1 )  = DEC
-			DUP, S_PUSH(1), EQ, OPCODE2(ZBRAN_H,2),
+			DUP, S_PUSH(1), S_EQ, OPCODE2(ZBRAN_H,2),
 			DROP, RET,
 			// DUP,   // ( r n -- r n n )
 			// ROT,  // ( r n n -- n r n )
 			OPCODE2(DUP,ROT),
 			MUL,   // ( n r n -- n r*n )
 			SWAP,  // ( n r - r n )
-			BRAN_B, -13 };
+			BRAN_B, -14 };
 
     assert(test_code_pop(prog1, sizeof(prog1)) == 10);
     assert(test_code_pop(prog2, sizeof(prog2)) == 20);
@@ -190,22 +192,41 @@ void test_call()
 
 void test_syscall()
 {
+    uint8_t prog0[] = { LIT_B, 'w', SYS_B, SYS_EMIT,
+			LIT_B, 'a', SYS_B, SYS_EMIT,
+			LIT_B, 'i', SYS_B, SYS_EMIT,
+			LIT_B, 't', SYS_B, SYS_EMIT,
+			LIT_B, '\n', SYS_B, SYS_EMIT,
+			LIT_B, 5,
+			EXIT};
+
     uint8_t prog1[] = {  LIT_B, 1, SYS_B, SYS_TIMER_INIT,
 			 LIT_B, 1, SYS_B, SYS_TIMER_START,
-			 LIT_B, 2, LIT_B, 0, SYS_B, SYS_SELECT,
+			 LIT_B, 1, SYS_B, SYS_SELECT_TIMER,
 			 LIT_B, 1, SYS_B, SYS_TIMER_TIMEOUT,
 			 ZBRAN_B, 7,
 			 LIT_B, 1, SYS_B, SYS_TIMER_STOP,
 			 LIT_B, 100, EXIT,
 			 YIELD,
 			 BRAN_B, -16 };
+    uint8_t prog9[] = { LIT_B, '>', SYS_B, SYS_EMIT,
+			LIT_B, ' ', SYS_B, SYS_EMIT,
+			// LABEL L1
+			SYS_B, SYS_KEY,
+			DUP, SYS_B, SYS_EMIT,
+			LIT_B, '\n', S_EQ,
+			ZBRAN_B, -10,
+			S_PUSH(1),
+			EXIT};
 
     uint8_t prog10[] = { LIT_B, 'o', SYS_B, SYS_EMIT,
 			 LIT_B, 'k', SYS_B, SYS_EMIT,
 			 LIT_B, '\n', SYS_B, SYS_EMIT,
 			 LIT_B, 3,
 			 EXIT};
+    assert(test_code_pop(prog0, sizeof(prog0)) == 5);
     assert(test_code_pop(prog1, sizeof(prog1)) == 100);
+    assert(test_code_pop(prog9, sizeof(prog9)) == 1);
     assert(test_code_pop(prog10, sizeof(prog10)) == 3);
 }
 
@@ -213,7 +234,6 @@ void test_syscall()
 
 int main()
 {
-#if 0
     test_integer_macros();
     test_arithmetic();
     test_comp();
@@ -221,7 +241,6 @@ int main()
     test_mem();
     test_branch();
     test_call();
-#endif
     test_syscall();
     exit(0);
 }

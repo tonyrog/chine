@@ -1,5 +1,5 @@
 
-# COMPACT OPCODE SCHEME
+# CHINE, a pretty compact opcode scheme
 
     +-+-----+----+
     |1|op:4 |op:3|  op:3 exuture before op:4
@@ -10,8 +10,8 @@
     +-----+--------+----------+
     |Type | opcode | mnemonic |
     +-----+--------+----------+
-    |     |	0  |  zbran.h |
-    |     |     1  |  push.h  |
+    |     |	0      |  zbran.h |
+    |     | 1      |  push.h  |
     |     |	2      |  dup     |
     | op3 |	3      |  rot     |
     |     |	4      |  over    |
@@ -29,7 +29,6 @@
     |     |	15     |  not     |
     +-----+--------+----------+
     |     | 16     |   /      |
-    |     | 17     |   mod    |
     | op7 | 18     |   xor    |
     |     | 19     |          |
     |     | ...    |          |
@@ -51,64 +50,48 @@
 
 ## INSTRUCTIONS
 
-| opcode| opname    |  stack effect | comment |
-|-------|-----------|---------------|---------|
-|   0   | zbranch.h L:4 | ( f -- ) |
-|   1   | push.h    n:4 |	( -- n ) |
-|   2   | dup       | ( a -- a a ) |
-|	3   | rot       | ( a b c -- b c a ) | rotate down |
-|	4   | over      | ( a b -- a b a ) |
-|   5   | drop      | ( a -- ) |
-|	6   | swap      | ( a b -- b a ) |
-|	7   | -         | ( a b -- [ a - b ] ) |
-
-|   8   | +         | ( x1 x2 -- [ x1+x2 ] )
-|   9   | *         | ( x1 x2 -- [ x1*x2) )
-|   11  | and       | ( a b -- [ a&b ] )
-|   12  | or        | ( a b -- [ a|b ] )
-|   13  | 0=        | ( a -- [ a==0 ] )
-|   14  | 0<        | ( a -- [ a<0 ] )
-|   15  | not       | ( a -- [ !a ] )
-
-|   16  | /         | ( a b -- [ a/b ] ) |
-|   17  | mod       | ( a b -- [ a%b ] ) |
-|   18  | xor       | ( a b -- [ a^b ] )
-|   19  | negate    | ( a -- [ -a ] ) |
-|   20  | invert    | ( a -- [ ~a ] )  |
-|   21  | lshift    | ( a n -- [ (uint)a << n] ) |
-|   22  | rshift    | ( a n -- [ (uint)a >> n ] ) |
-|   23  | arshift   | ( a n -- [ a >> n ] ) |
-|   24  | u<        | ( a b -- [ a<b ] ) |
-|   25  | !         | ( a i -- ) | mem[i] = a |
-|   26  | @         | ( i -- a ) | a = mem[i] |
-|   27  | nop       | ( -- ) |
-|   28  | u<=       | ( a b -- [ (uint)a <= (uint)b ] )
-|   29  | ;         | ( -- ) R: ( addr -- )  |
-|   30  | push.b n:16 | ( -- n )  |
-|   31  | push.l n:32 | ( -- n )  |
-|   32  | branch.b L:8 | ( -- ) |
-|   33  | branch.w L:16 | ( -- ) |
-|   34  | zbranch.w L:16 | ( f -- ) |
-|   35  | ibranch.b u:8 L1:8 .. Ln:8 | ( i -- ) |
-|   36  | ibranch.b u:16 L1:16 .. Ln:16 | ( i -- ) |
-|   37  | call.b L:8 | ( -- ) R: ( -- c-addr ) |
-|   38  | call.w L:16 | ( -- ) R: ( -- c-addr ) |
-|   39  | sys.b u:8 |  ( x1 .. xn -- v f ) |
-|   40  | exit | ( -- ) |
-|   41  | yield | ( -- ) |
-
-## EXAMPLES of compact replacements
-
-    -rot  = {rot,rot}
-    2drop = {drop,drop}
-    2dup  = {over,over}
-    nip   = {swap,drop}
-    tuck  = {swap,over}
-    sqr   = {dup,*}
-    2*    = {dup,+}
-    <>    = {-,not}
-    <>    = {=,not}
-    >     = {swap,<}
+| opname    |  stack effect       | comment       |
+|-----------|---------------------|---------------|
+| zbranch.h L:4 | ( f -- ) |
+| push.h n:4 |	( -- n ) |
+| dup        | ( a -- a a ) |
+| rot       | ( a b c -- b c a ) | rotate down |
+| over      | ( a b -- a b a ) |
+| drop      | ( a -- ) |
+| swap      | ( a b -- b a ) |
+| -         | ( a b -- [ a - b ] ) |
+| +         | ( x1 x2 -- [ x1+x2 ] )
+| *         | ( x1 x2 -- [ x1*x2) )
+| and       | ( a b -- [ a&b ] )
+| or        | ( a b -- [ a|b ] )
+| 0=        | ( a -- [ a==0 ] )
+| 0<        | ( a -- [ a<0 ] )
+| not       | ( a -- [ !a ] )
+| /         | ( a b -- [ a/b ] ) |
+| mod       | ( a b -- [ a%b ] ) |
+| xor       | ( a b -- [ a^b ] )
+| negate    | ( a -- [ -a ] ) |
+| invert    | ( a -- [ ~a ] )  |
+| lshift    | ( a u -- [ (uint)a << u ] ) |
+| rshift    | ( a u -- [ (uint)a >> u ] ) |
+| u<        | ( a b -- [ a<b ] ) |
+| !         | ( a i -- ) | mem[i] = a |
+| @         | ( i -- a ) | a = mem[i] |
+| nop       | ( -- ) |
+| u<=       | ( a b -- [ (uint)a <= (uint)b ] )
+| ;         | ( -- ) R: ( addr -- )  |
+| push.b n:16 | ( -- n )  |
+| push.l n:32 | ( -- n )  |
+| branch.b L:8 | ( -- ) |
+| branch.w L:16 | ( -- ) |
+| zbranch.w L:16 | ( f -- ) |
+| ibranch.b u:8 L1:8 .. Ln:8 | ( i -- ) |
+| ibranch.b u:16 L1:16 .. Ln:16 | ( i -- ) |
+| call.b L:8 | ( -- ) R: ( -- c-addr ) |
+| call.w L:16 | ( -- ) R: ( -- c-addr ) |
+| sys.b u:8 |  ( x1 .. xn -- v f ) |
+| exit | ( -- ) |
+| yield | ( -- ) |
 
 ## compiler built-ins min,max,abs ...
 
@@ -119,6 +102,7 @@
 	: >=   swap - 1- 0< ;	
 	: 1+ 1 + ;
 	: 1- 1 - ;
+	: mod over over / * - ;
 
 	: min
       over over   ( a b -- a b a b )
@@ -207,18 +191,23 @@
 | SYS\_TIMER\_TIMEOUT | 6    | ( i -- ) |
 | SYS\_TIMER\_RUNNING | 7    | ( i -- ) |
 | SYS\_INPUT\_FETCH   | 8    | ( i k -- v ) |
-| SYS\_SELECT         | 9    | ( tmask imask -- ) |
-| SYS\_EMIT           | 10   | ( char -- ) |
-| SYS\_KEY            | 11   | ( -- char ) |
-
+| SYS\_SELECT\_TIMER  | 9    | ( i -- ) |
+| SYS\_SELECT\_INPUT  | 10   | ( i -- ) |
+| SYS\_DESELECT_ALL   | 11   | ( -- ) |
+| SYS\_EMIT           | 12   | ( char -- ) |
+| SYS\_KEY            | 13   | ( -- char ) |
+| SYS\_QKEY           | 14   | ( -- f ) |
+|
 | SYS\_LED\_SET       | 12   | ( i -- ) |
 | SYS\_LED\_CLR       | 13   | ( i -- ) |
 | SYS\_LED\_MASK      | 14   | ( u16 -- ) |
-
 | SYS\_SET\_LEVEL     | 15   | ( i u16 -- ) |
-
 | SYS\_CAN\_LEVEL     | 16   | ( i u16 -- ) |
 
+    gpio_output(pin)
+    gpio_input(pin)
+    gpio_set(pin)
+    gpio_clr(pin)	
 
     digital_set(si)
     digital_clr(si)
