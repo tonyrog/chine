@@ -1,64 +1,39 @@
 
 # CHINE, a pretty compact opcode scheme
 
-    +-+-----+----+
-    |1|op:4 |op:3|  op:3 exuture before op:4
-    +-+----------+
-    |0|  op:7    |
-    +-+----------+
+    |000| op5  |
 
-    +-----+--------+----------+
-    |Type | opcode | mnemonic |
-    +-----+--------+----------+
-    |     |	0      |  zbran.h |
-    |     | 1      |  push.h  |
-    |     |	2      |  dup     |
-    | op3 |	3      |  rot     |
-    |     |	4      |  over    |
-    |     |	5      |  drop    |
-    |     |	6      |  swap   |
-    |     |	7      |  -       |
-    +-----+--------+----------+
-    |     |	8      |  +       |
-    |     |	9      |  *       |
-    |     |	10     |  =       |
-    | op4 |	11     |  and     |
-    |     |	12     |   or     |
-    |     |	13     |  0<      |
-    |     |	14     |  0=      |
-    |     |	15     |  not     |
-    +-----+--------+----------+
-    |     | 16     |   /      |
-    | op7 | 18     |   xor    |
-    |     | 19     |          |
-    |     | ...    |          |
+    |01|000|jop| <L:8>   jmpx, call, literal
+    |01|001|jop| <L:16>  jmpx, call, literal
+    |01|011|jop| <L:32>  jmpx, call, literal
+
+    |10|LLL|jop| jmpx, call, literal
+
+    |11|op3|op3|  two packed opcode first 8 regular opcodes
+
+## INSTRUCTIONS aop
 
 
+| opname    |  stack effect       | comment            |
+|-----------|---------------------|--------------------|
+| jmpz      | ( f -- )            |  top==0            |
+| jmpnz     | ( f -- )            |  top!=0            |
+| jmpgtz    | ( f -- )            |  top>0             |
+| jmpgez    | ( f -- )            |  top>=0            |
+| jmp       | (  -- )             |                    |
+| call      | (  -- )             |                    |
+| literal   | ( -- n )            |                    |
+| jmpi      | ( i --  )           |                    |
 
-## Pushing constants
+## INSTRUCTIONS op3/op6
 
-|1| literal.h | const:4/signed |                 |
-|0|                 literal.b  | const:8/signed  |
-|0|                 literal.w  | const:16/signed |
-|0|                 literal.l  | const:32/signed |
-
-## Conditional branch when top of stack is zero
-
-|1| zbran.h | offs:4/signed |                 |
-|0|          zbran.b | offs:8/signed           |
-|0|          zbran.w | offs:16/signed          |
-
-## INSTRUCTIONS
-
-| opname    |  stack effect       | comment       |
-|-----------|---------------------|---------------|
-| zbranch.h L:4 | ( f -- ) |
-| push.h n:4 |	( -- n ) |
-| dup        | ( a -- a a ) |
-| rot       | ( a b c -- b c a ) | rotate down |
-| over      | ( a b -- a b a ) |
-| drop      | ( a -- ) |
-| swap      | ( a b -- b a ) |
+| opname    |  stack effect        | comment       |
+|-----------|----------------------|---------------|
+| dup       | ( a -- a a )         |
+| rot       | ( a b c -- b c a )   | rotate down |
+| over      | ( a b -- a b a )     |
+| drop      | ( a -- )             |
+| swap      | ( a b -- b a )       |
 | -         | ( a b -- [ a - b ] ) |
 | +         | ( x1 x2 -- [ x1+x2 ] )
 | *         | ( x1 x2 -- [ x1*x2) )
@@ -66,88 +41,78 @@
 | or        | ( a b -- [ a|b ] )
 | 0=        | ( a -- [ a==0 ] )
 | 0<        | ( a -- [ a<0 ] )
+| 0<=       | ( a -- [ a<=0 ] )
 | not       | ( a -- [ !a ] )
 | /         | ( a b -- [ a/b ] ) |
-| mod       | ( a b -- [ a%b ] ) |
 | xor       | ( a b -- [ a^b ] )
 | negate    | ( a -- [ -a ] ) |
 | invert    | ( a -- [ ~a ] )  |
 | lshift    | ( a u -- [ (uint)a << u ] ) |
 | rshift    | ( a u -- [ (uint)a >> u ] ) |
 | u<        | ( a b -- [ a<b ] ) |
+| u<=       | ( a b -- [ (uint)a <= (uint)b ] )
 | !         | ( a i -- ) | mem[i] = a |
 | @         | ( i -- a ) | a = mem[i] |
 | nop       | ( -- ) |
-| u<=       | ( a b -- [ (uint)a <= (uint)b ] )
-| ;         | ( -- ) R: ( addr -- )  |
-| push.b n:16 | ( -- n )  |
-| push.l n:32 | ( -- n )  |
-| branch.b L:8 | ( -- ) |
-| branch.w L:16 | ( -- ) |
-| zbranch.w L:16 | ( f -- ) |
-| ibranch.b u:8 L1:8 .. Ln:8 | ( i -- ) |
-| ibranch.b u:16 L1:16 .. Ln:16 | ( i -- ) |
-| call.b L:8 | ( -- ) R: ( -- c-addr ) |
-| call.w L:16 | ( -- ) R: ( -- c-addr ) |
+| ret       | ( -- ) R: ( addr -- )  |
 | sys.b u:8 |  ( x1 .. xn -- v f ) |
-| exit | ( -- ) |
-| yield | ( -- ) |
+| exit      | ( -- )  |
+| yield     | ( -- )  |
 
 ## compiler built-ins min,max,abs ...
 
-	: = - 0= ;
+	: =    - 0= ;
 	: <    - 0< ;
-	: <=   - 1- 0< ;
+	: <=   - 0<= ;
 	: >    swap - 0< ;
-	: >=   swap - 1- 0< ;	
-	: 1+ 1 + ;
-	: 1- 1 - ;
+	: >=   swap - 0<= ;
+	: 1+   1 + ;
+	: 1-   1 - ;
 	: mod over over / * - ;
 
 	: min
-      over over   ( a b -- a b a b )
-      <         ( a b a b -- a b f )
-      if
-        drop         ( a b - a )
-      else
-        swap drop    ( a b - b )
-      then ;
+          over over   ( a b -- a b a b )
+          <         ( a b a b -- a b f )
+          if
+            drop         ( a b - a )
+          else
+            swap drop    ( a b - b )
+          then ;
 
-    : max ( a b -- [ max(a,b) ]
-      over over   ( a b -- a b a b )
-      <         ( a b a b -- a b f )
-      if
-        swap drop   ( a b - b )
+        : max ( a b -- [ max(a,b) ]
+          over over   ( a b -- a b a b )
+          <         ( a b a b -- a b f )
+          if
+            swap drop   ( a b - b )
 	  else
-        drop         ( a b - a )
-      then ;
+            drop         ( a b - a )
+          then ;
 
-    : abs ( a -- [ |a| ] )
-      dup 0<   ( a f )
+        : abs ( a -- [ |a| ] )
+          dup 0<   ( a f )
 	  if 
-        negate
+            negate
 	  then ;
 
-    : setbit    ( fld n -- [ fld or (1 << n) ] )
-      1 swap lshift or ;
+        : setbit    ( fld n -- [ fld or (1 << n) ] )
+          1 swap lshift or ;
 
-    : clrbit    ( fld n -- [ fld and ~(1 << n) ] )
-      1 swap lshift invert and ;
+        : clrbit    ( fld n -- [ fld and ~(1 << n) ] )
+          1 swap lshift invert and ;
 
-    : togglebit ( fld n -- [ fld xor (1 << n) ] )
-      1 swap lshift xor ;
+        : togglebit ( fld n -- [ fld xor (1 << n) ] )
+          1 swap lshift xor ;
 
-    : tstbit   ( fld n -- [ fld and (1 << n) ] )
-      1 swap lshift and ;
+        : tstbit   ( fld n -- [ fld and (1 << n) ] )
+          1 swap lshift and ;
 
-    : setclrbit ( fld n f -- [ if (f) setbit els clrbit ] )
+        : setclrbit ( fld n f -- [ if (f) setbit els clrbit ] )
 	  if
 	    setbit
 	  else
 	    clrbit
 	  then ;
 	  
-
 ## non branch alternatives ( mostly for fun )
 
     : min ( a b -- [ min(a,b) ]
@@ -181,28 +146,27 @@
 
 ## System calls
 
-| Name                | Code | Stack effect |
-|---------------------|------|--------------|
-| SYS\_PARAM\_FETCH   | 1    | ( i s -- v ) |
-| SYS\_PARAM\_STORE   | 2    | ( v i s -- ) |
-| SYS\_TIMER\_INIT    | 3    | ( i -- ) |
-| SYS\_TIMER\_START   | 4    | ( i -- ) |
-| SYS\_TIMER\_STOP    | 5    | ( i -- ) |
-| SYS\_TIMER\_TIMEOUT | 6    | ( i -- ) |
-| SYS\_TIMER\_RUNNING | 7    | ( i -- ) |
-| SYS\_INPUT\_FETCH   | 8    | ( i k -- v ) |
-| SYS\_SELECT\_TIMER  | 9    | ( i -- ) |
-| SYS\_SELECT\_INPUT  | 10   | ( i -- ) |
-| SYS\_DESELECT_ALL   | 11   | ( -- ) |
-| SYS\_EMIT           | 12   | ( char -- ) |
-| SYS\_KEY            | 13   | ( -- char ) |
-| SYS\_QKEY           | 14   | ( -- f ) |
-|
-| SYS\_LED\_SET       | 12   | ( i -- ) |
-| SYS\_LED\_CLR       | 13   | ( i -- ) |
-| SYS\_LED\_MASK      | 14   | ( u16 -- ) |
-| SYS\_SET\_LEVEL     | 15   | ( i u16 -- ) |
-| SYS\_CAN\_LEVEL     | 16   | ( i u16 -- ) |
+| Name                | Code | Stack effect |    comment   |
+|---------------------|------|--------------|--------------|
+| SYS\_PARAM\_FETCH   | 1    | ( i s -- v ) |  param@      |
+| SYS\_PARAM\_STORE   | 2    | ( v i s -- ) |  param!      |
+| SYS\_TIMER\_INIT    | 3    | ( i -- )     |  timer_init  |
+| SYS\_TIMER\_START   | 4    | ( i -- )     |  timer_start |
+| SYS\_TIMER\_STOP    | 5    | ( i -- )     |  timer_stop  |
+| SYS\_TIMER\_TIMEOUT | 6    | ( i -- )     |  timer_timeout |
+| SYS\_TIMER\_RUNNING | 7    | ( i -- )     |  timer_running |
+| SYS\_INPUT\_FETCH   | 8    | ( i k -- v ) |  input@        |
+| SYS\_SELECT\_TIMER  | 9    | ( i -- )     |  select_timer |
+| SYS\_SELECT\_INPUT  | 10   | ( i -- )     |  select_input |
+| SYS\_DESELECT_ALL   | 11   | ( -- )       |  deselect_all |
+| SYS\_EMIT           | 12   | ( char -- )  |  uart_send(c) |
+| SYS\_KEY            | 13   | ( -- char )  |  c=uar_recv() |
+| SYS\_QKEY           | 14   | ( -- f )     |  available()   |
+| SYS\_DIG\_SET       | 15   | ( i -- )     |  digital_set(si)   |
+| SYS\_DIG\_CLR       | 16   | ( i -- )     |  digital_clr(si)   |
+| SYS\_DIG\_MASK      | 17   | ( u16 -- )   |  digital_mask(mask) |
+| SYS\_SET\_LEVEL     | 18   | ( i u16 -- ) |  analog_set(si,level) |
+| SYS\_CAN\_LEVEL     | 19   | ( i u16 -- ) |  can_send(si,MSG_ANALOG,level)
 
     gpio_output(pin)
     gpio_input(pin)

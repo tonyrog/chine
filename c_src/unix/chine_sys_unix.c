@@ -19,7 +19,7 @@
 
 uint8_t  param_type[MAX_TIMERS];
 uint32_t param_delay[MAX_TIMERS] = 
-{ 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000 };
+{ 0, 1000, 2000, 3000, 4000, 5000, 6000, 7000 };
 uint32_t param_wait[MAX_TIMERS];
 uint32_t param_rampup[MAX_TIMERS];
 uint32_t param_rampdown[MAX_TIMERS];
@@ -134,6 +134,12 @@ int32_t chine_unix_sys(chine_t* mp,
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	*value = TSTBIT(mp->tbits, i) != 0;
+	return 1;
+    }
+
+    case SYS_NOW: {
+	*npop = 0;
+	*value = chine_millis();
 	return 1;
     }
 

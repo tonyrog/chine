@@ -1,42 +1,49 @@
 
 #include "../include/chine.h"
 
+// #if defined(ARDUINO)
+// #include <avr/pgmspace.h>
+// #else
+#define PROGMEM
+// #define pgm_read_byte(ptr) *((byte*)ptr)
+// #endif
+
 chine_t m1;
 chine_t m2;
 chine_t m3;
 
-uint8_t prog1[] = { LIT_B, 1, SYS_B, SYS_TIMER_INIT,
-		    // L1:
-		    LIT_B, 1, SYS_B, SYS_TIMER_START,
-		    LIT_B, 1, SYS_B, SYS_SELECT_TIMER,
-		    // L2:
-		    LIT_B, 1, SYS_B, SYS_TIMER_TIMEOUT,
-		    ZBRAN_B, 6,
-		    LIT_B, '1', SYS_B, SYS_EMIT,
-		    BRAN_B, U8(-20),
-		    YIELD,
-		    BRAN_B, U8(-15) };
+uint8_t prog1[] PROGMEM =
+{ PUSH8(1), SYS, SYS_TIMER_INIT,
+  PUSH8(1), SYS, SYS_TIMER_START,
+  PUSH8(1), SYS, SYS_SELECT_TIMER,
+  PUSH8(1), SYS, SYS_TIMER_TIMEOUT,
+  JOP8(JMPZ,6),
+  PUSH8('1'), SYS, SYS_EMIT,
+  JOP8(JMP,-20),
+  YIELD,
+  JOP8(JMP,-15) };
 
-uint8_t prog2[] = { LIT_B, 2, SYS_B, SYS_TIMER_INIT,
-		    LIT_B, 2, SYS_B, SYS_TIMER_START,
-		    LIT_B, 2, SYS_B, SYS_SELECT_TIMER,
-		    LIT_B, 2, SYS_B, SYS_TIMER_TIMEOUT,
-		    ZBRAN_B, 6,
-		    LIT_B, '2', SYS_B, SYS_EMIT,
-		    BRAN_B, U8(-20),
-		    YIELD,
-		    BRAN_B, U8(-15) };
+uint8_t prog2[] PROGMEM =
+{ PUSH8(2), SYS, SYS_TIMER_INIT,
+  PUSH8(2), SYS, SYS_TIMER_START,
+  PUSH8(2), SYS, SYS_SELECT_TIMER,
+  PUSH8(2), SYS, SYS_TIMER_TIMEOUT,
+  JOP8(JMPZ,6),
+  PUSH8('2'), SYS, SYS_EMIT,
+  JOP8(JMP,-20),
+  YIELD,
+  JOP8(JMP,-15) };
 
-uint8_t prog3[] = { LIT_B, 3, SYS_B, SYS_TIMER_INIT,
-		    LIT_B, 3, SYS_B, SYS_TIMER_START,
-		    LIT_B, 3, SYS_B, SYS_SELECT_TIMER,
-		    LIT_B, 3, SYS_B, SYS_TIMER_TIMEOUT,
-		    ZBRAN_B, 6,
-		    LIT_B, '3', SYS_B, SYS_EMIT,
-		    BRAN_B, U8(-20),
-		    YIELD,
-		    BRAN_B, U8(-15) };
-
+uint8_t prog3[] PROGMEM =
+{ PUSH8(3), SYS, SYS_TIMER_INIT,
+  PUSH8(3), SYS, SYS_TIMER_START,
+  PUSH8(3), SYS, SYS_SELECT_TIMER,
+  PUSH8(3), SYS, SYS_TIMER_TIMEOUT,
+  JOP8(JMPZ,6),
+  PUSH8('3'), SYS, SYS_EMIT,
+  JOP8(JMP,-20),
+  YIELD,
+  JOP8(JMP,-15) };
 
 extern int32_t chine_arduino_sys(chine_t* mp,
 				 int32_t sysop, int32_t* revarg,

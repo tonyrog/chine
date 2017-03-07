@@ -69,70 +69,81 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define INT16(ptr)  unpack_i16((ptr))
 #define INT32(ptr)  unpack_i32((ptr))
 
-#define OPCODE1(a)    ((a) & 0x7f)
-#define OPCODE2(a,b)  (0x80|(((b)&15)<<3)|((a)&7))
+#define OPCODE0(op)      (0x00 | ((op) & 63))
+#define OPCODE1(jop,l)   (0x40 | ((jop) & 7) | (((l) & 7) << 3)) // L+1 bytes
+#define OPCODE2(jop,l)   (0x80 | ((jop) & 7) | (((l) & 7) << 3)) // L:3/signed
+#define OPCODE3(op1,op2) (0xc0 | ((op1) & 7) | (((op2)&7) << 3))
 
+// opcode with argument OPCODE1 with L+1 bytes, OPCODE2 with signed L:3
+typedef enum {
+    JMPZ = 0,    // if (TOP == 0) goto L
+    JMPNZ,       // if (TOP != 0) goto L
+    JMPGTZ,      // if (TOP > 0) goto L
+    JMPGEZ,      // if (TOP >= 0) goto L
+    JMP,         // goto L
+    JMPI,        // goto *L
+    CALL,        // call(L)
+    LIT          // constant N
+} opcode1_t;
 
 typedef enum {
-    // op3 : first part of OPCODE2 also an OPCODE1
-    ZBRAN_H=0,  // either 4 or 8 bits offset
-    LIT_H,      // const: ( -- x ) either 4 or 8 bits
-    DUP,        // dup ( a -- a a )
+    // op3
+    DUP=0,        // dup ( a -- a a )
     ROT,        // rot ( a b c  -- b c a )  ( down )
     OVER,       // over ( a b -- b a )
     DROP,       // drop ( a -- )
     SWAP,       // swap ( a b -- b a )
     SUB,        // - ( a b -- [ a-b ] )
-    // op4 : second part of OPCODE2 also an OPCODE1
     ADD,        // +  ( x1 x2 -- (x1+x2) )
     MUL,        // *: ( x1 x2 -- (x1*x2) )
-    NEG,        // ( a -- (-a) )
+    // op6
+    NOP,        // nop: ( -- )
     AND,        // and: ( a b -- (a&b) )
     OR,         // or: ( a b -- (a|b) )
+    XOR,        // ( a b -- (a^b) )
     ZEQ,        // 0=:  ( a -- (a==0) )
     ZLT,        // 0<:  ( a -- (a<0) )
-    NOT,        // not: ( a -- not a)
-    // op7 : reset of opcodes 
-    NOP,        // nop: ( -- )
+    ZLE,        // 0<=: ( a -- (a<=0) )
     ULT,        // u<: ( a b -- (a < b) )
-    ULTE,       // u<= ( a b -- [a<=b] ) '-' '1-' '0<'
-    XOR,        // ( a b -- (a^b) )
-    DIV,        // ( a b -- (a/b) )
+    ULE,        // u<= ( a b -- [a<=b] )
+    NOT,        // not: ( a -- not a)
     INV,        // ( a -- (~a) )
+    NEG,        // ( a -- (-a) )
+    DIV,        // ( a b -- (a/b) )
     BSL,        // lshift: ( a u -- (a << u) )
     BSR,        // rshift: ( a u -- (a >> u) )
     STORE,      // ( a i -- )
     FETCH,      // ( i -- a )
     RET,        // ( -- ) R: ( addr -- )
-    LIT_W,      // ( -- w )
-    LIT_L,      // ( -- l )
-    BRAN_B,     // ( -- )
-    BRAN_W,     // ( -- )
-    ZBRAN_W,    // ( cond -- )
-    IBRAN_B,    // ( i -- )
-    IBRAN_W,    // ( i -- )
-    CALL_B,     // ( -- ) R: ( -- addr )
-    CALL_W,     // ( -- ) R: ( -- addr )
-    SYS_B,      // sys ( x1 .. xn -- y1 )
+    SYS,        // sys ( x1 .. xn -- y1 )
     EXIT,       // ( -- )
     YIELD,      // ( -- )
 } opcode_t;
 
-#define S_PUSH(x)     OPCODE2(LIT_H,(x))
+#define JOPi(jop,y)  OPCODE2((jop),(y)) // jump -4 .. 3
+#define JOP8(jop,y)  OPCODE1((jop),0),  U8((y))
+#define JOP16(jop,y) OPCODE1((jop),1),  U8((y)>>8), U8((y))
 
-// when PUSH_H/ZBRAN_H is a op7 then it's the byte versions
-#define LIT_B         LIT_H
-#define ZBRAN_B       ZBRAN_H
+#define PUSHi(x)     OPCODE2(LIT,(x)) // push -4 .. 3
+#define PUSH8(x)     OPCODE1(LIT,0), U8((x))
+#define PUSH16(x)    OPCODE1(LIT,1), U8((x)>>8), U8((x))
+#define PUSH32(x)    OPCODE1(LIT,3), U8((x)>>24), U8((x)>>16), U8((x)>>8), U8((x))
 
-#define S_INC S_PUSH(1), ADD
-#define S_DEC S_PUSH(1), SUB
+#define OPOP(x,y)    OPCODE3((x),(y))
+
+#define S_INC PUSHi(1), ADD
+#define S_DEC PUSHi(1), SUB
 #define S_LT  SUB, ZLT
-#define S_ABS DUP, ZLT, ZBRAN_B,1,NEG
-#define S_MIN OVER,OVER,S_LT,ZBRAN_B,3,DROP,BRAN_B,2,SWAP,DROP
-#define S_MAX OVER,OVER,S_LT,ZBRAN_B,4,SWAP,DROP,BRAN_B,1,DROP
+#define S_ABS DUP, ZLT, JOP8(JMPZ,1), NEG
+#define S_MIN OPOP(OVER,OVER),SUB,JOP8(JMPGEZ,3),DROP,\
+	JOP8(JMP,1),OPOP(SWAP,DROP)
+#define S_MAX OPOP(OVER,OVER),SUB,JOP8(JMPGEZ,3),	\
+	OPOP(SWAP,DROP),JOP8(JMP,1),DROP
 #define S_EQ  SUB, ZEQ
-#define S_MOD OVER, OVER, DIV, MUL, SUB
-#define S_ASR DUP,LIT_B,32,SWAP,SUB,S_PUSH(-1),SWAP,BSL,ROT,ROT,BSR,OR
+#define S_MOD OPOP(OVER,OVER), DIV, OPOP(MUL,SUB)
+#define S_ASR DUP,PUSH8(32),OPOP(SWAP,SUB),	\
+	PUSHi(-1),SWAP,BSL,ROT,ROT,BSR,OR
+
 // Failure codes
 #define FAIL_STACK_OVERFLOW    -1
 #define FAIL_STACK_UNDERFLOW   -2
@@ -142,6 +153,7 @@ typedef enum {
 #define FAIL_TIMER_OVERFLOW    -6
 #define FAIL_MEMORY_OVERFLOW   -7
 #define FAIL_BAD_ARG           -8
+#define FAIL_INVALID_OPCODE    -9
 
 // SYSTEM CALLS
 #define SYS_INIT          0  // ( -- )  called at init
@@ -159,6 +171,7 @@ typedef enum {
 #define SYS_EMIT         12  // ( c -- )     tx character on default uart
 #define SYS_KEY          13  // (   -- c )   rx character from uart or -1
 #define SYS_QKEY         14  // (   -- f )   1 if char is read 0 otherwise
+#define SYS_NOW          15  // ( -- u )     milliseconds since start
 
 // LED interface set_led / clr_led
 // CAN interface send message

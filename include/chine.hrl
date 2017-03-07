@@ -1,53 +1,58 @@
 -ifndef(__CHINE_HRL__).
 -define(__CHINE_HRL__, true).
 
--define(OPCODE1(X), ((X) band 0x7f)).
--define(OPCODE2(A,B), (16#80 bor (((B) band 15) bsl 3) bor ((A) band 7))).
+-define(OPCODE0(OP),     (16#00 bor ((OP) band 31))).
+%% K = 0 (1 byte arg) 1 = (2 byte arg)  3 = (4 bytes arg)
+-define(OPCODE1(JOP,K),  (16#40 bor ((JOP) band 7) bor (((K) band 7) bsl 3))).
+%% X == 3 bit signed integer
+-define(OPCODE2(JOP,X),  (16#80 bor ((JOP) band 7) bor (((X) band 7) bsl 3))).
+%% Combne opcode1 and opcode2 (in range 0..7) into one byte
+-define(OPCODE3(OP1,OP2),(16#c0 bor ((OP1) band 7) bor (((OP2) band 7) bsl 3))).
+
+-record(jopcode, {
+	  jmpz,     %% (TOP == 0)
+	  jmpnz,    %% (TOP != 0)
+	  jmpgtz,   %% (TOP > 0)
+	  jmpgez,   %% (TOP >= 0)
+	  jmp,
+	  jmpi,
+	  call,
+	  literal
+	 }).
 
 -record(opcode, {
-	  %% op3 0..7
-	  'zbranch.h',
-	  'literal.h',
 	  dup,
 	  rot,
 	  over,
 	  drop,
 	  swap,
 	  '-',
-	  %% op4 8..15
 	  '+',
 	  '*',
-	  negate,
+	  %% op6
+	  'nop',
 	  'and',
 	  'or',
+	  'xor',
 	  '0=',
 	  '0<',
-	  'not',
-	  %% op7 ..
-	  'nop',
+	  '0<=',
 	  'u<',
 	  'u<=',
-	  'xor',
+	  'not',
+	  invert,
+	  negate,
 	  '/',
-	  'invert',
-	  'lshift',
-	  'rshift',
+	  lshift,
+	  rshift,
 	  '!',
 	  '@',
-	  'ret',
-	  'literal.w',
-	  'literal.l',
-	  'branch.b',
-	  'branch.w',
-	  'zbranch.w',
-	  'ibranch.b',
-	  'ibranch.w',
-	  'call.b',
-	  'call.w',
-	  'sys.b',
+	  ret,
+	  sys,
 	  exit,
 	  yield
 	 }).
+
 
 %% Failure codes
 -define(FAIL_STACK_OVERFLOW,    -1).
@@ -73,7 +78,7 @@
 -define(SYS_EMIT,         12).  %% ( c -- )
 -define(SYS_KEY,          13).  %% (   -- c )
 -define(SYS_QKEY,         14).  %% (   -- f )
-
+-define(SYS_NOW,          15).  %% ( -- u )
 %% INPUT kind (k)
 -define(INPUT_BOOLEAN, 0).
 -define(INPUT_ANALOG,  1).
