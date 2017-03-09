@@ -78,12 +78,12 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 typedef enum {
     JMPZ = 0,    // if (TOP == 0) goto L
     JMPNZ,       // if (TOP != 0) goto L
-    JMPGTZ,      // if (TOP > 0) goto L
-    JMPGEZ,      // if (TOP >= 0) goto L
+    JNEXT,       // if (--RP[0]>=0) goto L; else RP--;
+    JMPLZ,       // if (TOP < 0) goto L
     JMP,         // goto L
-    JMPI,        // goto *L
     CALL,        // call(L)
-    LIT          // constant N
+    LITERAL,     // constant N
+    ARRAY        // Array (of constants)
 } opcode1_t;
 
 typedef enum {
@@ -103,46 +103,80 @@ typedef enum {
     XOR,        // ( a b -- (a^b) )
     ZEQ,        // 0=:  ( a -- (a==0) )
     ZLT,        // 0<:  ( a -- (a<0) )
-    ZLE,        // 0<=: ( a -- (a<=0) )
-    ULT,        // u<: ( a b -- (a < b) )
-    ULE,        // u<= ( a b -- [a<=b] )
     NOT,        // not: ( a -- not a)
-    INV,        // ( a -- (~a) )
-    NEG,        // ( a -- (-a) )
-    DIV,        // ( a b -- (a/b) )
-    BSL,        // lshift: ( a u -- (a << u) )
-    BSR,        // rshift: ( a u -- (a >> u) )
-    STORE,      // ( a i -- )
-    FETCH,      // ( i -- a )
-    RET,        // ( -- ) R: ( addr -- )
+    INV,        // invert ( a -- (~a) )
+    NEG,        // negate ( a -- (-a) )
+    DIV,        // / ( a b -- (a/b) )
+    SHFT,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
+    STORE,      // ! ( a i -- )
+    FETCH,      // @ ( i -- a )
+    TOR,        // >r ( n -- ) R: ( -- n )
+    FROMR,      // r> R: ( n -- ) ( -- n )
+    RFETCH,     // r@: R: ( n -- n ) ( -- n )
+    EXIT,       // exit/; ( -- ) R: ( addr -- )
     SYS,        // sys ( x1 .. xn -- y1 )
-    EXIT,       // ( -- )
     YIELD,      // ( -- )
+    ELEM,       // [] ( a* i -- n )
+    EXEC,       // execute ( a* i -- )
+    // OP_29,
+    // OP_30,
+    // OP_31
 } opcode_t;
 
-#define JOPi(jop,y)  OPCODE2((jop),(y)) // jump -4 .. 3
-#define JOP8(jop,y)  OPCODE1((jop),0),  U8((y))
-#define JOP16(jop,y) OPCODE1((jop),1),  U8((y)>>8), U8((y))
+#define ARG8(x)   U8((x))
+#define ARG16(x)  U8((x)>>8), U8((x))
+#define ARG32(x)  U8((x)>>24), U8((x)>>16), U8((x)>>8), U8((x))
 
-#define PUSHi(x)     OPCODE2(LIT,(x)) // push -4 .. 3
-#define PUSH8(x)     OPCODE1(LIT,0), U8((x))
-#define PUSH16(x)    OPCODE1(LIT,1), U8((x)>>8), U8((x))
-#define PUSH32(x)    OPCODE1(LIT,3), U8((x)>>24), U8((x)>>16), U8((x)>>8), U8((x))
+#define JOPi(jop,y)  OPCODE2((jop),(y)) // jump -4 .. 3
+#define JOP8(jop,y)  OPCODE1((jop),0),  ARG8((y))
+#define JOP16(jop,y) OPCODE1((jop),1),  ARG16((y))
+
+#define PUSHi(x)     OPCODE2(LITERAL,(x)) // push -4 .. 3
+#define PUSH8(x)     OPCODE1(LITERAL,0), ARG8((x))
+#define PUSH16(x)    OPCODE1(LITERAL,1), ARG16((x))
+#define PUSH32(x)    OPCODE1(LITERAL,2), ARG32((x))
+
+#define ARRAY8i(n)   OPCODE2(ARRAY,(n))
+#define ARRAY8_8(n)  OPCODE1(ARRAY,0),  ARG8((n))
+#define ARRAY8_16(n) OPCODE1(ARRAY,1),  ARG8((n))
+#define ARRAY8_32(n) OPCODE1(ARRAY,2),  ARG8((n))
+#define ARRAY16_8(n)  OPCODE1(ARRAY,4), ARG16((n))
+#define ARRAY16_16(n) OPCODE1(ARRAY,5), ARG16((n))
+#define ARRAY16_32(n) OPCODE1(ARRAY,6), ARG16((n))
 
 #define OPOP(x,y)    OPCODE3((x),(y))
 
+// : 1+
 #define S_INC PUSHi(1), ADD
+// : 1-
 #define S_DEC PUSHi(1), SUB
+// : <
 #define S_LT  SUB, ZLT
+// : abs
 #define S_ABS DUP, ZLT, JOP8(JMPZ,1), NEG
-#define S_MIN OPOP(OVER,OVER),SUB,JOP8(JMPGEZ,3),DROP,\
+// : max 
+#define S_MIN OPOP(OVER,OVER),SUB,ZLT,JOP8(JMPZ,3),DROP,	\
 	JOP8(JMP,1),OPOP(SWAP,DROP)
-#define S_MAX OPOP(OVER,OVER),SUB,JOP8(JMPGEZ,3),	\
+// : max 
+#define S_MAX OPOP(OVER,OVER),SUB,ZLT,JOP8(JMPZ,3),	\
 	OPOP(SWAP,DROP),JOP8(JMP,1),DROP
+// : =
 #define S_EQ  SUB, ZEQ
+// : mod
 #define S_MOD OPOP(OVER,OVER), DIV, OPOP(MUL,SUB)
+// : arshift
 #define S_ASR DUP,PUSH8(32),OPOP(SWAP,SUB),	\
-	PUSHi(-1),SWAP,BSL,ROT,ROT,BSR,OR
+	PUSHi(-1),SWAP,SHFT,ROT,ROT,NEG,SHFT,OR
+// : 0<= 1- 0< ;
+#define S_ZLE PUSHi(1),SUB,ZLT
+// : 2dup
+#define S_2DUP OPOP(OVER,OVER)
+// : u< ( u u -- t ) 2dup xor 0< if swap drop 0< else - 0< then ;
+#define S_ULT S_2DUP, XOR, ZLT, JOP8(JMPZ,4),	\
+	OPOP(SWAP,DROP), ZLT, JOP8(JMP,2), SUB, ZLT
+// : u<=  2dup xor 0< if swap drop 0< else - 0<= then ;
+#define S_ULE S_2DUP, XOR, ZLT, JOP8(JMPZ,4),	\
+	OPOP(SWAP,DROP), ZLT, JOP8(JMP,6), SUB, S_ZLE
 
 // Failure codes
 #define FAIL_STACK_OVERFLOW    -1
@@ -152,26 +186,39 @@ typedef enum {
 #define FAIL_DIV_ZERO          -5
 #define FAIL_TIMER_OVERFLOW    -6
 #define FAIL_MEMORY_OVERFLOW   -7
-#define FAIL_BAD_ARG           -8
+#define FAIL_INVALID_ARGUMENT  -8
 #define FAIL_INVALID_OPCODE    -9
 
 // SYSTEM CALLS
-#define SYS_INIT          0  // ( -- )  called at init
-#define SYS_PARAM_FETCH   1  // ( i s -- n )
-#define SYS_PARAM_STORE   2  // ( v i s -- )
-#define SYS_TIMER_INIT    3  // ( i -- )
-#define SYS_TIMER_START   4  // ( i --  )
-#define SYS_TIMER_STOP    5  // ( i --  )
-#define SYS_TIMER_TIMEOUT 6  // ( i -- f )
-#define SYS_TIMER_RUNNING 7  // ( i -- f )
-#define SYS_INPUT_FETCH   8  // ( i k -- n )
-#define SYS_SELECT_TIMER  9  // ( i -- )
-#define SYS_SELECT_INPUT 10  // ( i -- )
-#define SYS_DESELECT_ALL 11  // ( -- )
-#define SYS_EMIT         12  // ( c -- )     tx character on default uart
-#define SYS_KEY          13  // (   -- c )   rx character from uart or -1
-#define SYS_QKEY         14  // (   -- f )   1 if char is read 0 otherwise
-#define SYS_NOW          15  // ( -- u )     milliseconds since start
+typedef enum {
+    SYS_INIT = 0,      // ( -- )  called at init
+    SYS_PARAM_FETCH,   // ( i s -- n )
+    SYS_PARAM_STORE,   // ( v i s -- )
+    SYS_TIMER_INIT,    // ( i -- )
+    SYS_TIMER_START,    // ( i --  )
+    SYS_TIMER_STOP,     // ( i --  )
+    SYS_TIMER_TIMEOUT,  // ( i -- f )
+    SYS_TIMER_RUNNING,  // ( i -- f )
+    SYS_INPUT_FETCH,    // ( i k -- n )
+    SYS_OUTPUT_STORE,   // ( i k n -- )
+    SYS_SELECT_TIMER,   // ( i -- )
+    SYS_DESELECT_TIMER, // ( i -- )
+    SYS_SELECT_INPUT,   // ( i -- )
+    SYS_DESELECT_INPUT, // ( i -- )
+    SYS_DESELECT_ALL,   // ( -- )
+    SYS_UART_SEND,      // ( c -- )     tx character on default uart
+    SYS_UART_RECV,      // (   -- c )   rx character from uart or -1
+    SYS_UART_AVAIL,     // (   -- f )   1 if char is read 0 otherwise
+    SYS_NOW,            // ( -- u )     milliseconds since start
+    SYS_GPIO_INPUT,     // ( i -- )
+    SYS_GPIO_OUTPUT,    // ( i -- )
+    SYS_GPIO_SET,       // ( i -- )
+    SYS_GPIO_CLR,       // ( i -- )
+    SYS_GPIO_GET,       // ( i -- n )
+    SYS_ANALOG_SEND,    // ( i u16 -- )
+    SYS_ANALOG_RECV,    // ( i -- u16 )
+    SYS_CAN_SEND,       // ( i u16 n -- )
+} syscall_t;
 
 // LED interface set_led / clr_led
 // CAN interface send message
@@ -182,20 +229,13 @@ typedef enum {
 #define INPUT_ENCODER 2
 
 // Program normally should look something like
-// {ibranch, [Main,Init,Final]}
-// {branch, Fail}
+// {array,[Main,Init,Final]},'jmp*',
 // {label,Init}
 //   <init code>
 //   ret
 // {label,Final
 //   <cleanup code>
 //   ret
-// {label,Main}
-//   <main code>
-//
-// If Init/Final are missing then:
-// zbranch, Main,
-// ret
 // {label,Main}
 //   <main code>
 //
@@ -206,9 +246,9 @@ typedef struct _chine_t
     cell_t*  cSP;
     cell_t*  cRP;
     cell_t   cErr;     // last system error
-    cell_t  (*sys)(struct _chine_t* mp,
-		   cell_t sysop, cell_t* revarg,
-		   cell_t* npop, cell_t* reason);
+    int (*sys)(struct _chine_t* mp,
+	       cell_t sysop, cell_t* revarg,
+	       cell_t* npop, cell_t* reason);
     uint8_t* prog;                // program area
     cell_t   stack[MAX_STACK];    // stack
     cell_t   rstack[MAX_RSTACK];  // call stack (relative addresses etc)
@@ -216,18 +256,19 @@ typedef struct _chine_t
     uint8_t  imask[NUM_IBYTES];   // input mask
     uint8_t  tbits[NUM_TBYTES];   // timer running bits
     uint8_t  tmask[NUM_TBYTES];   // selected timers
-    uint32_t timer[MAX_TIMERS];   // timers
+    timeout_t timer[MAX_TIMERS];   // timers
 } chine_t;
 
 extern void chine_init(chine_t* mp, uint8_t* prog, 
-		       int32_t  (*sys)(chine_t* mp,
-				       cell_t sysop, cell_t* revarg,
-				       cell_t* npop, cell_t* reason));
+		       int  (*sys)(chine_t* mp,
+				   cell_t sysop, cell_t* revarg,
+				   cell_t* npop, cell_t* reason));
 extern int chine_run(chine_t* mp);
 extern timeout_t chine_millis(void);
 extern timeout_t chine_micros(void);
-extern int chine_next(chine_t** mpv, size_t n,
-		      timeout_t* tmop, uint8_t* imask);
+extern int chine_next(chine_t* mp, timeout_t* tmop, uint8_t* imask);
+extern int chine_nextv(chine_t** mpv, size_t n,
+		       timeout_t* tmop, uint8_t* imask);
 
 #ifdef __cplusplus
 }

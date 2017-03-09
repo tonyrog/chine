@@ -4,6 +4,12 @@
 
 CFLAGS = -O3 -Wall -DDISPATCH_WITH_SWITCH
 #CFLAGS = -DTRACE -Wall -DDISPATCH_WITH_SWITCH
+BIN = ../../bin
+
+all:	$(BIN)/chine_exec chine_test chine_test3 chine_bench
+
+$(BIN)/chine_exec: ../chine.c ../../include/chine.h ../unix/chine_sys_unix.c chine_exec.c
+	$(CC) $(CFLAGS) -o $@ ../chine.c ../unix/chine_sys_unix.c chine_exec.c
 
 chine_test: ../chine.c ../../include/chine.h ../unix/chine_sys_unix.c chine_test.c
 	$(CC) $(CFLAGS) -o $@ ../chine.c ../unix/chine_sys_unix.c chine_test.c

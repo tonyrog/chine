@@ -10,6 +10,9 @@
 #if defined(ARDUINO)
   #include "Arduino.h"
   #define DISPATCH_WITH_SWITCH
+  #define CHINE_INLINE
+#else
+  #define CHINE_INLINE inline
 #endif
 
 #if !defined(DISPATCH_WITH_SWITCH) && !defined(DISPATCH_WITH_JUMPTABLE)
@@ -19,9 +22,9 @@
 #include "../include/chine.h"
 
 void chine_init(chine_t* mp, uint8_t* prog,
-		cell_t  (*sys)(chine_t* mp,
-			       cell_t sysop, cell_t* revarg,
-			       cell_t* npop, cell_t* reason))
+		int (*sys)(chine_t* mp,
+			   cell_t sysop, cell_t* revarg,
+			   cell_t* npop, cell_t* reason))
 {
     mp->prog = prog;
     mp->sys  = sys;
@@ -34,38 +37,81 @@ void chine_init(chine_t* mp, uint8_t* prog,
     (*sys)(mp, SYS_INIT, NULL, NULL, NULL);
 }
 
-// check vector of machines for input poll and timeout
-int chine_next(chine_t** mpv, size_t n, timeout_t* tmop, uint8_t* imask)
+// calculcuate next timeout,
+// return 1 and the the update timeout value in tmop (if != NULL)
+// return 0 otherwise
+int chine_timeout(chine_t* mp, timeout_t* tmop)
 {
-    timeout_t tmo = 0xffffffff;
-    int i;
+    int i = 0;
+    int r = 0;
+    timeout_t tmo;
 
-    for (i = 0; i < n; i++) {
-	int j;
-
-	if (imask) {
-	    for (j = 0; j < NUM_IBYTES; j++)
-		imask[j] |= mpv[i]->imask[j];
-	}
-
-	for (j = 0; j < NUM_TBYTES; j++) {
-	    uint8_t tm;
-	    if ((tm = mpv[i]->tmask[j]) != 0) {
-		int t = 0;
-		while(tm && (t < 8)) {
-		    if (tm & (1 << t)) {
-			int32_t remain = mpv[i]->timer[j*8+t] - chine_millis();
-			if (remain < 0)   remain = 0;
-			if ((timeout_t)remain < tmo) tmo = remain;
-		    }
-		    tm &= ~(1 << t);
-		    t++;
+    if (tmop)
+	tmo = *tmop;  // refine
+    else
+	tmo = 0xffffffff;
+    
+    while(i < NUM_TBYTES) {
+	uint8_t tm;
+	// only check timers that are selected and running
+	if ((tm = (mp->tmask[i] & mp->tbits[i])) != 0) {
+	    int t = 0;
+	    while(tm && (t < 8)) {
+		if (tm & (1 << t)) {
+		    int32_t remain = mp->timer[i*8+t] - chine_millis();
+		    if (remain < 0) remain = 0;
+		    if ((timeout_t)remain < tmo)
+			tmo = remain;
+		    r = 1;
 		}
+		tm &= ~(1 << t);
+		t++;
 	    }
 	}
+	i++;
     }
     if (tmop) *tmop = tmo;
-    return 0;
+    return r;
+}
+
+// check if any input is selected and update imask (if != NULL)
+// return 1 any input is selected
+// return 0 otherwise
+int chine_input_mask(chine_t* mp, uint8_t* imask)
+{
+    int r = 0;
+    int i = 0;
+
+    while(!r && (i < NUM_IBYTES)) {
+	if (mp->imask[i]) r = 1;
+	if (imask) imask[i] |= mp->imask[i];
+	i++;
+    }
+    return r;
+}
+
+// calculcuate next timeout or input(s)
+// return 1 if a chine is waiting on a timer or is waiting for input,
+//          an updated timeout time is stored in tmop if not NULL.
+// return 0 otherwise 
+int chine_next(chine_t* mp, timeout_t* tmop, uint8_t* imask)
+{ 
+    int r;
+    // NOTE! must calculate both! || is not correct.
+    r = chine_input_mask(mp, imask);
+    r |= chine_timeout(mp, tmop);
+    return r;
+}
+
+
+// check vector of machines for input poll and timeout
+// return 1 if any of the machines in mpv is waiting for input/timer
+int chine_nextv(chine_t** mpv, size_t n, timeout_t* tmop, uint8_t* imask)
+{
+    int i, r = 0;
+    for (i = 0; i < n; i++)
+	r |= chine_next(mpv[i], tmop, imask);
+    return r;
 }
 
 #ifdef TRACE
@@ -79,7 +125,7 @@ void static trace_begin(int op,char* tok,cell_t* sp,int size)
     for (i = size-1; i >= 0; i--)
 	printf(" %d", sp[i]);
     printf(" -- ");
-    if (op == EXIT)
+    if (op == YIELD)
 	printf(")\n");
 }
 
@@ -127,31 +173,84 @@ void static trace_end(int op, cell_t* sp, cell_t* sp0, int size, int size0)
     (mp)->cSP = cSP;				\
     (mp)->cRP = cRP
 
+static CHINE_INLINE int get_array_len(uint8_t I, uint8_t* ptr, cell_t* argp)
+{
+    if ((I >> 6) == 2) {
+	*argp=((I>>3)&7);
+	return 0;
+    }
+    else {
+	switch((I>>3) & 7) {
+	case 0: *argp=UINT8(ptr); return 1;
+	case 1: *argp=UINT8(ptr); return 1;
+	case 2: *argp=UINT8(ptr); return 1;
+	case 4: *argp=UINT16(ptr); return 2;
+	case 5: *argp=UINT16(ptr); return 2;
+	case 6: *argp=UINT16(ptr); return 2;
+	default: *argp=0; return -1;
+	}
+    }
+}
+
+static CHINE_INLINE int get_element_len(uint8_t I)
+{
+    if ((I >> 6) == 2)
+	return 1;
+    else {
+	switch((I>>3) & 7) {
+	case 0:  return 1;
+	case 1:  return 2;
+	case 2:  return 4;
+	case 4:  return 1;
+	case 5:  return 2;
+	case 6:  return 4;
+	default: return 0;
+	}
+    }
+}
+
+static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
+{
+    if ((I >> 6) == 2) {
+	*argp = (((int8_t)(I<<2))>>5); 
+	return 0;
+    }
+    else {
+	switch((I>>3) & 7) {
+	case 0: *argp=INT8(ptr); return 1;
+	case 1: *argp=INT16(ptr); return 2;
+	case 2: *argp=INT32(ptr); return 4;
+	default: *argp=0; return -1;
+	}
+    }
+}
+
 #if defined(DISPATCH_WITH_JUMPTABLE)
 
 #define SWITCH_DATA() \
-    void*     N;	   \
-    static void* opA[] = { \
-    [JMPZ]   = &&op_JMPZ,   [JMPNZ]  = &&op_JMPNZ,\
-    [JMPGTZ] = &&op_JMPGTZ, [JMPGEZ] = &&op_JMPGEZ, \
-    [JMP]    = &&op_JMP,    [JMPI]   = &&op_JMPI, \
-    [CALL]   = &&op_CALL,   [LIT]    = &&op_LIT }; \
-    static void* op[] = { [DUP]   = &&op_DUP, [ROT]   = &&op_ROT,  \
-			  [OVER]  = &&op_OVER, [DROP]  = &&op_DROP, \
-			  [SWAP]  = &&op_SWAP, [SUB]   = &&op_SUB, \
-			  [ADD]   = &&op_ADD,  [MUL]   = &&op_MUL, \
-			  [NOP]   = &&op_NOP,  [AND]   = &&op_AND, \
-			  [OR]    = &&op_OR,   [XOR]   = &&op_XOR, \
-			  [ZEQ]   = &&op_ZEQ,  [ZLT]   = &&op_ZLT, \
-			  [ZLE]   = &&op_ZLE,  [ULT]   = &&op_ULT, \
-			  [ULE]   = &&op_ULE,  [NOT]   = &&op_NOT, \
-			  [INV]   = &&op_INV,  [NEG]   = &&op_NEG, \
-			  [DIV]   = &&op_DIV,  [BSL]   = &&op_BSL, \
-			  [BSR]   = &&op_BSR,  [STORE] = &&op_STORE, \
-			  [FETCH] = &&op_FETCH, [RET]   = &&op_RET, \
-			  [SYS]   = &&op_SYS, [EXIT]  = &&op_EXIT, \
-			  [YIELD] = &&op_YIELD, \
-			  [(YIELD+1) ... 31] = &&op_FAIL }
+    void*     N;							\
+    static void* opA[] = {						\
+    [JMPZ]   = &&op_JMPZ,   [JMPNZ]  = &&op_JMPNZ,			\
+    [JNEXT] = &&op_JNEXT, [JMPLZ] = &&op_JMPLZ,				\
+    [JMP]    = &&op_JMP, [CALL]   = &&op_CALL,				\
+    [LITERAL] = &&op_LITERAL, [ARRAY] = &&op_ARRAY };			\
+    static void* op[] = { [DUP]   = &&op_DUP, [ROT]   = &&op_ROT,	\
+			  [OVER]  = &&op_OVER, [DROP]  = &&op_DROP,	\
+			  [SWAP]  = &&op_SWAP, [SUB]   = &&op_SUB,	\
+			  [ADD]   = &&op_ADD,  [MUL]   = &&op_MUL,	\
+			  [NOP]   = &&op_NOP,  [AND]   = &&op_AND,	\
+			  [OR]    = &&op_OR,   [XOR]   = &&op_XOR,	\
+			  [ZEQ]   = &&op_ZEQ,  [ZLT]   = &&op_ZLT,	\
+			  [NOT]   = &&op_NOT,				\
+			  [INV]   = &&op_INV,  [NEG]   = &&op_NEG,	\
+			  [DIV]   = &&op_DIV,  [SHFT]  = &&op_SHFT,	\
+                          [STORE] = &&op_STORE,[FETCH] = &&op_FETCH,	\
+                          [TOR]   = &&op_TOR,  [FROMR] = &&op_FROMR,	\
+                          [RFETCH] = &&op_RFETCH,			\
+			  [SYS]   = &&op_SYS, [EXIT]  = &&op_EXIT,	\
+			  [YIELD] = &&op_YIELD,				\
+                          [ELEM] = &&op_ELEM, [EXEC] = &&op_EXEC,	\
+			  [(EXEC+1) ... 31] = &&op_FAIL }
 
 #define SWITCH() do {				\
 	N = &&next;				\
@@ -160,22 +259,11 @@ void static trace_end(int op, cell_t* sp, cell_t* sp0, int size, int size0)
 	I = *cIP++;					\
 	switch(I >> 6) {				\
 	case 0: goto *op[I&31];				\
-	case 1:						\
-	    switch((I>>3)&7) {				\
-	    case 0:  A = INT8(cIP); break;		\
-	    case 1:  A = INT16(cIP); break;		\
-	    case 3:  A = INT32(cIP); break;		\
-	    default: A = 0; fail(FAIL_INVALID_OPCODE);	\
-	    }						\
-	    TRACEF("A=%d, k=%d ", A, (((I>>3)&7)+1));	\
-	    cIP += (((I>>3)&7)+1);			\
-	    goto *opA[I & 7];				\
-	case 2:						\
-	    A = (((int8_t)(I<<2))>>5);			\
-	    goto *opA[I & 7];				\
+        case 1: goto *opA[I&7];				\
+	case 2: goto *opA[I&7];				\
 	case 3:						\
 	    N = &&next1;				\
-	    goto *op[I & 7];				\
+	    goto *op[I&7];				\
 	}						\
     next1:						\
 	N = &&next;					\
@@ -197,23 +285,11 @@ void static trace_end(int op, cell_t* sp, cell_t* sp0, int size, int size0)
 next:							\
     TRACEF("%04u: ", (int)(cIP - mp->prog));		\
     I = *cIP++;						\
-    switch(I >> 6) {					\
+    switch(I>>6) {					\
     case 0: J=I&31; break;         			\
-    case 1:						\
-	switch((I>>3)&7) {				\
-	case 0:  A = INT8(cIP); break;			\
-	case 1:  A = INT16(cIP); break;			\
-	case 3:  A = INT32(cIP); break;			\
-	default: A = 0; fail(FAIL_INVALID_OPCODE);	\
-	}						\
-	TRACEF("A=%d, k=%d ", A, (((I>>3)&7)+1));	\
-	cIP += (((I>>3)&7)+1);				\
-	J = (I&7)+32; break;				\
-    case 2:						\
-        A = (((int8_t)(I<<2))>>5);			\
-	J = (I&7)+32; break;				\
-    case 3:						\
-        J = I&7; break;					\
+    case 1: J=(I&7)+32; break;				\
+    case 2: J=(I&7)+32; break;				\
+    case 3: J=I&7; break;				\
     }							\
 next1:							\
     switch(J) {						\
@@ -247,65 +323,77 @@ int chine_run(chine_t* mp)
 
 JCASE(JMPZ): {
 	BEGIN(JMPZ,"jmpz",1,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
 	if (*cSP++ == 0) cIP += A;
 	END(JMPZ,"jmpz",1,0);
     }
 
 JCASE(JMPNZ): {
 	BEGIN(JMPNZ,"jmpnz",1,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
 	if (*cSP++ != 0) cIP += A;
 	END(JMPNZ,"jmpnz",1,0);
     }
 
-JCASE(JMPGTZ): {
-	BEGIN(JMPGTZ,"jmpgtz",1,0);
-	if (*cSP++ > 0) cIP += A;
-	END(JMPGTZ,"jmpgtz",1,0);
+JCASE(JNEXT): {
+	BEGIN(JNEXT,"next",0,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
+	if (--cRP[0]>0) cIP += A; else cRP++;
+	END(JNEXT,"next",0,0);
     }
 
-JCASE(JMPGEZ): {
-	BEGIN(JMPGEZ,"jmpgez",1,0);
-	if (*cSP++ >= 0) cIP += A;
-	END(JMPGEZ,"jmpgez",1,0);
+JCASE(JMPLZ): {
+	BEGIN(JMPLZ,"jmplz",1,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
+	if (*cSP++ < 0) cIP += A;
+	END(JMPLZ,"jmplz",1,0);
     }
 
 JCASE(JMP): {
 	BEGIN(JMP,"jmp",0,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
 	cIP += A;
 	END(JMP,"jmp",0,0);
     }
 
 JCASE(CALL): {
 	BEGIN(CALL,"call",0,0);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
 	*--cRP = (cIP - mp->prog);
 	cIP += A;
 	END(CALL,"call",0,0);
     }
 
-JCASE(JMPI): {
-	BEGIN(JMPI,"jmpi",1,0);
-	// A = n size of jump table
-	uint8_t k = ((I>>3)&7)+1;  // number of argument bytes
-	cell_t i = *cSP++;
-
-	if ((i < 0) || (i >= A))
-	    cIP += k*A;  /* skip when out of range */
-	else {
-	    int32_t j;
-	    switch(k) {
-	    case 1: j = INT8(cIP+1*i); break;
-	    case 2: j = INT16(cIP+2*i); break;
-	    case 4: j = INT32(cIP+4*i); break;
-	    }
-	    cIP += (k*A+j);
-	}
-	END(JMPI,"jmpi",1,0);
+JCASE(LITERAL): {
+	BEGIN(LITERAL,"literal",0,1);
+	int j;
+	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
+	*--cSP = A;
+	END(LITERAL,"literal",0,1);
     }
 
-JCASE(LIT): {
-	BEGIN(LIT,"literal",0,1);
-	*--cSP = A;
-	END(LIT,"literal",0,1);
+JCASE(ARRAY): {
+	// push array pointer on stack and skip
+	BEGIN(ARRAY,"array",0,1);
+	int j;
+	*--cSP = ((cIP-1) - mp->prog);
+	if ((j = get_array_len(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	cIP += j;
+	cIP += (get_element_len(I)*A);
+	END(ARRAY,"array",0,1);
     }
 
 CASE(DUP): {
@@ -398,12 +486,6 @@ CASE(ZLT): {
 	END(ZLT,"0<",1,1);
     }
 
-CASE(ZLE): {
-	BEGIN(ZLE,"0<=",1,1);
-	cSP[0] = (cSP[0] <= 0);
-	END(ZLE,"0<=",1,1);
-    }
-
 CASE(NOT): {
 	BEGIN(NOT,"not",1,1);
 	cSP[0] = !cSP[0];
@@ -413,20 +495,6 @@ CASE(NOT): {
 CASE(NOP): {
 	BEGIN(NOP,"nop",0,0);
 	END(NOP,"nop",0,0);
-    }
-
-CASE(ULT): {
-	BEGIN(ULT,"u<",2,1);
-	cSP[1] = ((ucell_t)cSP[1] < (ucell_t)cSP[0]);
-	cSP++;
-	END(ULT,"u<",2,1);
-    }
-
-CASE(ULE): {
-	BEGIN(ULE,"u<=",2,1);
-	cSP[1] = ((ucell_t)cSP[1] <= (ucell_t)cSP[0]);
-	cSP++;
-	END(ULE,"u<=",2,1);
     }
 
 CASE(XOR): {
@@ -450,20 +518,16 @@ CASE(INV): {
 	END(INV,"invert",1,1);
     }
 
-CASE(BSL): {
-	BEGIN(BSL,"lshift",2,1);
-	cSP[1] = ((ucell_t)cSP[1]) << ((ucell_t)cSP[0]);
+CASE(SHFT): { // shift left (or right)
+	BEGIN(SHFT,"shift",2,1);
+	if (cSP[0] >= 0)
+	    cSP[1] = ((ucell_t)cSP[1]) << cSP[0];
+	else
+	    cSP[1] = ((ucell_t)cSP[1]) >> -cSP[0];
 	cSP++;
-	END(BSL,"lshift",2,1);
+	END(SHFT,"shift",2,1);
     }
 
-CASE(BSR): {
-	BEGIN(BSR,"rshift",2,1);
-	cSP[1] = ((ucell_t)cSP[1]) >> ((ucell_t)cSP[0]);
-	cSP++;
-	END(BSR,"rshift",2,1);
-    }
-    
 CASE(STORE): {
 	BEGIN(STORE,"!",2,0);
 	cell_t i = cSP[0];
@@ -481,10 +545,35 @@ CASE(FETCH): {
 	END(FETCH,"@",1,1);
     }
 
-CASE(RET): {
-	BEGIN(RET,"ret",0,0);
+CASE(TOR): {
+	BEGIN(TOR,">r",1,0);
+	*--cRP = *cSP++;
+	END(TOR,">r",1,0);
+    }
+
+CASE(FROMR): {
+	BEGIN(FROMR,"r>",0,1);
+	*--cSP = *cRP++;
+	END(FROMR,"r>",0,1);
+    }
+
+CASE(RFETCH): {
+	BEGIN(RFETCH,"r@",0,1);
+	*--cSP = cRP[0];
+	END(RFETCH,"r@",0,1);
+    }
+
+CASE(EXIT): {
+	BEGIN(EXIT,"exit",0,0);
 	cIP = mp->prog + *cRP++;
-	END(RET,"ret",0,0);
+	END(EXIT,"exit",0,0);
+    }
+
+CASE(YIELD): {
+	BEGIN(YIELD,"yield",0,0);
+	SWAP_OUT(mp);
+	XEND(YIELD,"yield",0,0);
+	return 0;
     }
 
 CASE(SYS): {
@@ -496,32 +585,54 @@ CASE(SYS): {
 
 	cIP++;
 	if ((ret = (*mp->sys)(mp, sysop, cSP, &npop, &value)) < 0) {
-	    TEND(SYS,"sys.b",0,0);
+	    TEND(SYS,"sys",0,0);
 	    fail(ret);
 	}
 	cSP += npop; // pop arguments
 	if (ret > 0) {
 	    *--cSP = value;
 	}
-	END(SYS,"sys.b",0,0);
+	END(SYS,"sys",0,0);
     }
 
-CASE(EXIT): {
-	BEGIN(EXIT,"exit",0,0);
-	SWAP_OUT(mp);
-	XEND(EXIT,"exit",0,0);
-	return 0;
+CASE(ELEM): {
+	BEGIN(ELEM,"[]",2,1);
+	uint8_t* aptr;
+	int i, j, n;
+	// check that top of element is a array pointer, 
+	// and that index on second element is an index into
+	// that  array, push the element onto stack
+	i    = cSP[0];             // get index
+	aptr = mp->prog + cSP[1];  // get array address
+
+	if (((*aptr & 7) != ARRAY) ||
+	    ((j = get_array_len(*aptr, aptr+1, &A)) < 0))
+	    fail(FAIL_INVALID_ARGUMENT);
+	if ((i < 0) || (i > A))
+	    fail(FAIL_INVALID_ARGUMENT);
+	n = get_element_len(*aptr);
+	aptr += (j+1);
+
+	switch(n) {
+	case 1: cSP[1] = INT8(aptr + i*n); break;
+	case 2: cSP[1] = INT16(aptr + i*n); break;
+	case 4: cSP[1] = INT32(aptr + i*n); break;
+	default: fail(FAIL_INVALID_ARGUMENT);
+	}
+	cSP++;
+	END(ELEM,"[]",2,1);
     }
 
-CASE(YIELD): {
-	BEGIN(YIELD,"yield",0,0);
-	SWAP_OUT(mp);
-	XEND(YIELD,"yield",0,0);
-	return 1;
+CASE(EXEC): {
+	BEGIN(EXEC,"execute",1,0);
+	// place a call to the location given by addr on top of stack
+	// the address is a location relative to program start
+	*--cRP = (cIP - mp->prog);  // save return address
+	cIP = mp->prog + *cSP++;
+	END(EXEC,"execute",1,0);
     }
 
 ENDCASE();
-
 
 L_fail:
     SWAP_OUT(mp);

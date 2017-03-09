@@ -12,13 +12,16 @@
 -record(jopcode, {
 	  jmpz,     %% (TOP == 0)
 	  jmpnz,    %% (TOP != 0)
-	  jmpgtz,   %% (TOP > 0)
-	  jmpgez,   %% (TOP >= 0)
+	  next,     %% (--RP[0]<0) 
+	  jmplz,    %% (TOP < 0)
 	  jmp,
-	  jmpi,
 	  call,
-	  literal
+	  literal,
+	  array
 	 }).
+
+-define(JOP(X), (#jopcode.X-2)).
+-define(JENUM(X), X => (#jopcode.X-2)).
 
 -record(opcode, {
 	  dup,
@@ -36,22 +39,24 @@
 	  'xor',
 	  '0=',
 	  '0<',
-	  '0<=',
-	  'u<',
-	  'u<=',
 	  'not',
 	  invert,
 	  negate,
 	  '/',
-	  lshift,
-	  rshift,
+	  shift,
 	  '!',
 	  '@',
-	  ret,
-	  sys,
+	  '>r',
+	  'r>',
+	  'r@',
 	  exit,
-	  yield
+	  sys,
+	  yield,
+	  '[]',
+	  execute
 	 }).
+-define(OP(X), (#opcode.X-2)).
+-define(ENUM(X), X => (#opcode.X-2)).
 
 
 %% Failure codes
@@ -63,22 +68,38 @@
 -define(FAIL_TIMER_OVERFLOW,    -6).
 -define(FAIL_MEMORY_OVERFLOW,   -7).
 
-%% SYSTEM CALLS
--define(SYS_PARAM_FETCH,   1).  %% ( i s -- n )
--define(SYS_PARAM_STORE,   2).  %% ( v i s -- )
--define(SYS_TIMER_INIT,    3).  %% ( i --  )
--define(SYS_TIMER_START,   4).  %% ( i time --  )
--define(SYS_TIMER_STOP,    5).  %% ( i --  )
--define(SYS_TIMER_TIMEOUT, 6).  %% ( i -- f )
--define(SYS_TIMER_RUNNING, 7).  %% ( i -- f )
--define(SYS_INPUT_FETCH,   8).  %% ( i k -- n )
--define(SYS_SELECT_TIMER,  9).  %% ( i -- )
--define(SYS_SELECT_INPUT, 10).  %% ( i -- )
--define(SYS_DESELECT_ALL, 11).  %% ( -- )
--define(SYS_EMIT,         12).  %% ( c -- )
--define(SYS_KEY,          13).  %% (   -- c )
--define(SYS_QKEY,         14).  %% (   -- f )
--define(SYS_NOW,          15).  %% ( -- u )
+-record(sys, {
+	  sys_init,
+	  sys_param_fetch,
+	  sys_param_store,
+	  sys_timer_init,
+	  sys_timer_start,
+	  sys_timer_stop,
+	  sys_timer_timeout,
+	  sys_timer_running,
+	  sys_input_fetch,
+	  sys_output_store,
+	  sys_select_timer,
+	  sys_deselect_timer,
+	  sys_select_input,
+	  sys_deselect_input,
+	  sys_deselect_all,
+	  sys_uart_send,
+	  sys_uart_recv,
+	  sys_uart_avail,
+	  sys_now,
+	  sys_gpio_input,
+	  sys_gpio_output,
+	  sys_gpio_set,
+	  sys_gpio_clr,
+	  sys_gpio_get,
+	  sys_analog_send,
+	  sys_analog_recv,
+	  sys_can_send
+	 }).
+-define(SYS(N), (#sys.X-2)).
+-define(SENUM(X), X => (#sys.X-2)).
+
 %% INPUT kind (k)
 -define(INPUT_BOOLEAN, 0).
 -define(INPUT_ANALOG,  1).

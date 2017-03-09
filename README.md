@@ -1,29 +1,9 @@
 
 # CHINE, a pretty compact opcode scheme
 
-    |000| op5  |
-
-    |01|000|jop| <L:8>   jmpx, call, literal
-    |01|001|jop| <L:16>  jmpx, call, literal
-    |01|011|jop| <L:32>  jmpx, call, literal
-
-    |10|LLL|jop| jmpx, call, literal
-
-    |11|op3|op3|  two packed opcode first 8 regular opcodes
-
-## INSTRUCTIONS aop
-
-
-| opname    |  stack effect       | comment            |
-|-----------|---------------------|--------------------|
-| jmpz      | ( f -- )            |  top==0            |
-| jmpnz     | ( f -- )            |  top!=0            |
-| jmpgtz    | ( f -- )            |  top>0             |
-| jmpgez    | ( f -- )            |  top>=0            |
-| jmp       | (  -- )             |                    |
-| call      | (  -- )             |                    |
-| literal   | ( -- n )            |                    |
-| jmpi      | ( i --  )           |                    |
+Chine is a byte code machine. The chine
+machine and its byte code is easy to port to a number 
+of architectures.
 
 ## INSTRUCTIONS op3/op6
 
@@ -37,81 +17,94 @@
 | -         | ( a b -- [ a - b ] ) |
 | +         | ( x1 x2 -- [ x1+x2 ] )
 | *         | ( x1 x2 -- [ x1*x2) )
+| nop       | ( -- )               |
 | and       | ( a b -- [ a&b ] )
 | or        | ( a b -- [ a|b ] )
+| xor       | ( a b -- [ a^b ] )
 | 0=        | ( a -- [ a==0 ] )
 | 0<        | ( a -- [ a<0 ] )
-| 0<=       | ( a -- [ a<=0 ] )
 | not       | ( a -- [ !a ] )
-| /         | ( a b -- [ a/b ] ) |
-| xor       | ( a b -- [ a^b ] )
-| negate    | ( a -- [ -a ] ) |
 | invert    | ( a -- [ ~a ] )  |
-| lshift    | ( a u -- [ (uint)a << u ] ) |
-| rshift    | ( a u -- [ (uint)a >> u ] ) |
-| u<        | ( a b -- [ a<b ] ) |
-| u<=       | ( a b -- [ (uint)a <= (uint)b ] )
+| negate    | ( a -- [ -a ] ) |
+| /         | ( a b -- [ a/b ] ) |
+| shift     | ( a n -- [ (uint)a << n OR (int)a >> -n ] ) |
 | !         | ( a i -- ) | mem[i] = a |
 | @         | ( i -- a ) | a = mem[i] |
-| nop       | ( -- ) |
-| ret       | ( -- ) R: ( addr -- )  |
-| sys.b u:8 |  ( x1 .. xn -- v f ) |
-| exit      | ( -- )  |
-| yield     | ( -- )  |
+| >r        | ( n -- ) R: ( -- n )
+| r>        | R: ( n -- ) ( -- n )
+| r@        | R: ( n -- n ) ( -- n )
+| sys u:8   |    ( x1 .. xn -- v f ) |
+| exit      | ;  ( -- ) R: ( addr -- )  |
+| yield     |    ( -- )  |
+| []        | ( caddr i -- n )
+| execute   | ( caddr -- )
+
+## INSTRUCTIONS jop
+
+| opname    |  stack effect       | comment            |
+|-----------|---------------------|--------------------|
+| jmpz      | ( f -- )            |  top==0            |
+| jmpnz     | ( f -- )            |  top!=0            |
+| next      | ( -- )              |  rtop>=0           |
+| jmplz     | ( f -- )            |  top<0             |
+| jmp       | (  -- )             |                    |
+| call      | ( -- )              |                    |
+| literal   | ( -- n )            |                    |
+| array     | ( -- caddr )        |                    |
+
 
 ## compiler built-ins min,max,abs ...
 
-	: =    - 0= ;
-	: <    - 0< ;
-	: <=   - 0<= ;
-	: >    swap - 0< ;
-	: >=   swap - 0<= ;
 	: 1+   1 + ;
 	: 1-   1 - ;
-	: mod over over / * - ;
-
-	: min
-          over over   ( a b -- a b a b )
-          <         ( a b a b -- a b f )
-          if
-            drop         ( a b - a )
-          else
-            swap drop    ( a b - b )
-          then ;
-
-        : max ( a b -- [ max(a,b) ]
-          over over   ( a b -- a b a b )
-          <         ( a b a b -- a b f )
-          if
-            swap drop   ( a b - b )
-	  else
-            drop         ( a b - a )
-          then ;
-
+	: lshift shift ;
+	: rshift negate shift ;
+	: <    - 0< ;
+	: >    swap - 0< ;
+	: <=   - 0<= ;
+	: >=   swap - 0<= ;
+	: =    - 0= ;
+	: 2dup over over ;
+	: 2drop drop drop ;
+        : u< 2dup xor 0< 
+	  if swap drop 0< else - 0< then ;
+        : u<= 2dup xor 0< 
+	  if swap drop 0< else - 0<= then ;
+	: u> swap u< ;
+        : u>= swap u<= ;
+	: 0<> 0= not ;
+	: 0>  0 > ;
+	: 0<= 1- 0< ;
         : abs ( a -- [ |a| ] )
-          dup 0<   ( a f )
-	  if 
-            negate
-	  then ;
+          dup 0< if negate then ;
+	: min ( a b -- [ min(a,b) ] )
+          2dup < if drop else swap drop then ;
+        : max ( a b -- [ max(a,b) ]
+          2dup < if swap drop else drop then ;
+        : nip swap drop ;
+	: tuck swap over ;
+	: -rot rot rot ;
+	: arshift dup 32 swap -
+		  -1 swap shift -rot negate shift or ;
+	: 2* dup + ;
+	: 2/ 1 arshift ;
+	: sqr dup * ;
+	: mod 2dup / * - ;
 
-        : setbit    ( fld n -- [ fld or (1 << n) ] )
-          1 swap lshift or ;
-
-        : clrbit    ( fld n -- [ fld and ~(1 << n) ] )
-          1 swap lshift invert and ;
-
-        : togglebit ( fld n -- [ fld xor (1 << n) ] )
+	: jmp* >r exit ;
+	: SEMI exit ;
+	: setbit    ( fld n -- [ fld or (1 << n) ] )
+	  1 swap lshift or ;
+	: clrbit    ( fld n -- [ fld and ~(1 << n) ] )
+	  1 swap lshift invert and ;
+	: togglebit ( fld n -- [ fld xor (1 << n) ] )
           1 swap lshift xor ;
-
-        : tstbit   ( fld n -- [ fld and (1 << n) ] )
+	: tstbit   ( fld n -- [ fld and (1 << n) ] )
           1 swap lshift and ;
+	: setclrbit ( fld n f -- [ if (f) setbit els clrbit ] )
+	  if setbit else clrbit then ;
 
-        : setclrbit ( fld n f -- [ if (f) setbit els clrbit ] )
-	  if
-	    setbit
-	  else
-	    clrbit
-	  then ;
+	: jmp* ( caddr -- ) >r exit ;
 	  
 ## non branch alternatives ( mostly for fun )
 
@@ -146,44 +139,30 @@
 
 ## System calls
 
-| Name                | Code | Stack effect |    comment   |
-|---------------------|------|--------------|--------------|
-| SYS\_PARAM\_FETCH   | 1    | ( i s -- v ) |  param@      |
-| SYS\_PARAM\_STORE   | 2    | ( v i s -- ) |  param!      |
-| SYS\_TIMER\_INIT    | 3    | ( i -- )     |  timer_init  |
-| SYS\_TIMER\_START   | 4    | ( i -- )     |  timer_start |
-| SYS\_TIMER\_STOP    | 5    | ( i -- )     |  timer_stop  |
-| SYS\_TIMER\_TIMEOUT | 6    | ( i -- )     |  timer_timeout |
-| SYS\_TIMER\_RUNNING | 7    | ( i -- )     |  timer_running |
-| SYS\_INPUT\_FETCH   | 8    | ( i k -- v ) |  input@        |
-| SYS\_SELECT\_TIMER  | 9    | ( i -- )     |  select_timer |
-| SYS\_SELECT\_INPUT  | 10   | ( i -- )     |  select_input |
-| SYS\_DESELECT_ALL   | 11   | ( -- )       |  deselect_all |
-| SYS\_EMIT           | 12   | ( char -- )  |  uart_send(c) |
-| SYS\_KEY            | 13   | ( -- char )  |  c=uar_recv() |
-| SYS\_QKEY           | 14   | ( -- f )     |  available()   |
-| SYS\_DIG\_SET       | 15   | ( i -- )     |  digital_set(si)   |
-| SYS\_DIG\_CLR       | 16   | ( i -- )     |  digital_clr(si)   |
-| SYS\_DIG\_MASK      | 17   | ( u16 -- )   |  digital_mask(mask) |
-| SYS\_SET\_LEVEL     | 18   | ( i u16 -- ) |  analog_set(si,level) |
-| SYS\_CAN\_LEVEL     | 19   | ( i u16 -- ) |  can_send(si,MSG_ANALOG,level)
-
-    gpio_output(pin)
-    gpio_input(pin)
-    gpio_set(pin)
-    gpio_clr(pin)	
-
-    digital_set(si)
-    digital_clr(si)
-    digital_mask(si)
-    value = digital_get(si)
-	
-    analog_set(si, value)
-    value = analog_get(si)
-
-    can_send(si, MSG_ANALOG,  value)
-    can_send(si, MSG_DIGITAL, value)
-    can_send(si, MSG_ENCODER, value)
-
-    uart_send(c)
-    c = uart_recv()
+| Name                | Code | Stack effect|comment|
+|---------------------|------|-------------|-------|
+| param@         | ( i s -- v )     |       |
+| param!         | ( i si v -- )    |       |
+| timer_init     | ( i -- )         |       |
+| timer_start    | ( i -- )         |       |
+| timer_stop     | ( i -- )         |       |
+| timer_timeout  | ( i -- )         |       |
+| timer_running  | ( i -- )         |       |
+| input@         | ( i k -- v )     |       |
+| select_timer   | ( i -- )         |       |
+| deselect_timer | ( i -- )         |       |
+| select_input   | ( i -- )         |       |
+| dselect_input  | ( i -- )         |       |
+| deselect_all   | ( -- )           |       |
+| uart_send      | ( c -- )      |       |
+| uart_recv      | ( -- c )      |       |
+| uart_available | ( -- f )         |       |
+| timer_now      | ( -- u )         | ms sinc system start |
+| gpio_input     | ( i -- )         |       |
+| gpio_output    | ( i -- )         |       |
+| gpio_set       | ( i -- )         |       |
+| gpio_clr       | ( i -- )         |       |
+| gpio_get       | ( i -- n )       |       |
+| analog_send    | ( i u16 -- )     |       |
+| analog_recv    | ( i -- u16 )     |       |
+| can_send       | ( u16 si n -- )  |       |
