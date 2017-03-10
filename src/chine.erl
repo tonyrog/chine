@@ -127,10 +127,10 @@ asm_list(Code,Opts) ->
        fun encode_opcodes/2], Code, Opts).
 
 transform([F|Fs], Code, Opts) ->
-    debugf(Opts, "Code = ~w\n", [Code]),
+    debugf(Opts, "Code = ~p\n", [Code]),
     transform(Fs, F(Code,Opts), Opts);
 transform([], Code, Opts) ->
-    debugf(Opts, "Code = ~w\n", [Code]),
+    debugf(Opts, "Code = ~p\n", [Code]),
     Code.
 
 debugf(Opts,Fmt,As) ->
@@ -300,71 +300,94 @@ synthetic_opcodes() ->
        analog_clr    => [{sys,sys_analog_clr}],
        can_send      => [{sys,sys_can_send}],
        %% aliases
-       'emit' => [{sys,sys_uart_send}],
-       'key' => [{sys,sys_uart_recv}],
-       'key?' => [{sys,sys_uart_avail}]
+       'emit'        => [{sys,sys_uart_send}],
+       'key'         => [{sys,sys_uart_recv}],
+       '?key'        => [{sys,sys_uart_avail}]
      }.
 
-
 expand_synthetic(Code,_Opts) ->
-    lists:flatten(expand_synth_(Code)).
+    lists:flatten(expand_synth_(Code, #{})).
 
-expand_synth_([{'if',Then}|Code]) ->
+expand_synth_([{'if',Then}|Code],Sym) ->
     L = new_label(),
-    [{{jop,jmpz},L}, expand_synth_(Then), {label,L} | expand_synth_(Code)];
-expand_synth_([{'if',Then,Else}|Code]) ->
+    [{{jop,jmpz},L}, expand_synth_(Then,Sym), {label,L} | 
+     expand_synth_(Code,Sym)];
+expand_synth_([{'if',Then,Else}|Code],Sym) ->
     L0 = new_label(),
     L1 = new_label(),
-    [{{jop,jmpz},L0}, expand_synth_(Then),{{jop,jmp},L1},
-     {label,L0}, expand_synth_(Else),{label,L1} | 
-     expand_synth_(Code)];
-expand_synth_([{'again',Loop}|Code]) ->
+    [{{jop,jmpz},L0}, expand_synth_(Then,Sym),{{jop,jmp},L1},
+     {label,L0}, expand_synth_(Else,Sym),{label,L1} | 
+     expand_synth_(Code,Sym)];
+expand_synth_([{'again',Loop}|Code],Sym) ->
     L0 = new_label(),
-    [{label,L0}, expand_synth_(Loop), {{jop,jmp},L0} | 
-     expand_synth_(Code)];
-expand_synth_([{'until',Loop}|Code]) ->
+    [{label,L0}, expand_synth_(Loop,Sym), {{jop,jmp},L0} | 
+     expand_synth_(Code,Sym)];
+expand_synth_([{'until',Loop}|Code],Sym) ->
     L0 = new_label(),
-    [{label,L0}, expand_synth_(Loop), {{jop,jmpz},L0} | 
-     expand_synth_(Code)];
-expand_synth_([{'repeat',Loop,While}|Code]) ->
+    [{label,L0}, expand_synth_(Loop,Sym), {{jop,jmpz},L0} | 
+     expand_synth_(Code,Sym)];
+expand_synth_([{'repeat',Loop,While}|Code],Sym) ->
     L0 = new_label(),
     L1 = new_label(),
-    [{label,L0}, expand_synth_(Loop), {{jop,jmpz},L1}, expand_synth_(While),
-     {{jop,jmp},L0},{label,L1} | expand_synth_(Code)];
-expand_synth_([{'for',Loop}|Code]) ->
+    [{label,L0}, expand_synth_(Loop,Sym),
+     {{jop,jmpz},L1}, expand_synth_(While,Sym),
+     {{jop,jmp},L0},{label,L1} | expand_synth_(Code,Sym)];
+expand_synth_([{'for',Loop}|Code],Sym) ->
     %% fixme: compile to allow for exit to leave for loop
     L0 = new_label(),
     ['>r',
      {label,L0},
-     expand_synth_(Loop), %% use R@ while in loop to get loop index
-     {{jop,next},L0} | expand_synth_(Code)];
-expand_synth_([{Jop,L}|Code]) when
+     expand_synth_(Loop,Sym), %% use R@ while in loop to get loop index
+     {{jop,next},L0} | expand_synth_(Code,Sym)];
+expand_synth_([{enum,Ls}|Code], Sym) ->
+    Sym1 = add_enums_(Ls, 0, Sym),
+    expand_synth_(Code, Sym1);
+expand_synth_([{comment,_Comment}|Code], Sym) ->
+    %% just a comment ignore it
+    expand_synth_(Code, Sym);
+expand_synth_([{Jop,L}|Code],Sym) when
       Jop =:= jmpz; Jop =:= jmpnz;
       Jop =:= next; Jop =:= jmplz;
       Jop =:= jmp; Jop =:= call ->
-    [{{jop,Jop},L} | expand_synth_(Code)];
-expand_synth_([Op|Code]) when is_tuple(Op) ->
-    [Op | expand_synth_(Code)];
-expand_synth_([Op|Code]) when is_atom(Op) ->
+    [{{jop,Jop},L} | expand_synth_(Code,Sym)];
+expand_synth_([Op={const,C}|Code],Sym) when is_integer(C) ->
+    [Op | expand_synth_(Code,Sym)];
+expand_synth_([{const,E}|Code],Sym) ->
+    case maps:find(E, Sym) of
+	{ok,C} ->
+	    [{const,C} | expand_synth_(Code,Sym)];
+	error ->
+	    io:format("error: symbol ~p not defined\n", [E]),
+	    [{const,E} | expand_synth_(Code,Sym)]
+    end;
+expand_synth_([Op|Code],Sym) when is_tuple(Op) ->
+    [Op | expand_synth_(Code,Sym)];
+expand_synth_([Op|Code],Sym) when is_atom(Op) ->
     Map = synthetic_opcodes(),
     case maps:find(Op,Map) of
 	error ->
-	    [Op|expand_synth_(Code)];
+	    [Op|expand_synth_(Code,Sym)];
 	{ok,Ops} when is_list(Ops) ->
-	    [expand_synth_(Ops)|expand_synth_(Code)]
+	    [expand_synth_(Ops,Sym)|expand_synth_(Code,Sym)]
     end;
-expand_synth_([Op|Code]) when is_integer(Op) ->
-    [{const,Op} | expand_synth_(Code)];
-expand_synth_([Ops|Code]) when is_list(Ops) ->
+expand_synth_([Op|Code],Sym) when is_integer(Op) ->
+    [{const,Op} | expand_synth_(Code,Sym)];
+expand_synth_([Ops|Code],Sym) when is_list(Ops) ->
     try erlang:iolist_to_binary(Ops) of
 	Bin ->
-	    [{string,binary_to_list(Bin)}|expand_synth_(Code)]
+	    [{string,binary_to_list(Bin)}|expand_synth_(Code,Sym)]
     catch
 	error:_ ->
-	    [expand_synth_(Ops)|expand_synth_(Code)]
+	    [expand_synth_(Ops,Sym)|expand_synth_(Code,Sym)]
     end;
-expand_synth_([]) ->
+expand_synth_([],_Sym) ->
     [].
+
+add_enums_([E|Es], I, Sym) ->
+    Sym1 = maps:put(E, I, Sym),
+    add_enums_(Es, I+1, Sym1);
+add_enums_([], _I, Sym) ->
+    Sym.
     
 %%
 %% Replace branch labels with offsets

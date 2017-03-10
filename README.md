@@ -28,8 +28,8 @@ of architectures.
 | negate    | ( a -- [ -a ] ) |
 | /         | ( a b -- [ a/b ] ) |
 | shift     | ( a n -- [ (uint)a << n OR (int)a >> -n ] ) |
-| !         | ( a i -- ) | mem[i] = a |
-| @         | ( i -- a ) | a = mem[i] |
+| !         | ( n i -- ) | mem[i] = n |
+| @         | ( i -- n ) | n = mem[i] |
 | >r        | ( n -- ) R: ( -- n )
 | r>        | R: ( n -- ) ( -- n )
 | r@        | R: ( n -- n ) ( -- n )
@@ -141,7 +141,7 @@ of architectures.
 
 | Name                | Code | Stack effect|comment|
 |---------------------|------|-------------|-------|
-| param@         | ( i s -- v )     |       |
+| param@         | ( i si -- v )     |       |
 | param!         | ( i si v -- )    |       |
 | timer_init     | ( i -- )         |       |
 | timer_start    | ( i -- )         |       |
@@ -156,7 +156,7 @@ of architectures.
 | deselect_all   | ( -- )           |       |
 | uart_send      | ( c -- )      |       |
 | uart_recv      | ( -- c )      |       |
-| uart_available | ( -- f )         |       |
+| uart_avail     | ( -- f )         |       |
 | timer_now      | ( -- u )         | ms sinc system start |
 | gpio_input     | ( i -- )         |       |
 | gpio_output    | ( i -- )         |       |
