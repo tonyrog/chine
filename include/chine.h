@@ -11,11 +11,24 @@
 extern "C" {
 #endif
 
+#ifdef __GNUC__
+#  define UNUSED(x) UNUSED_ ## x __attribute__((__unused__))
+#else
+#  define UNUSED(x) UNUSED_ ## x
+#endif
+
+#ifdef __GNUC__
+#  define UNUSED_FUNCTION(x) __attribute__((__unused__)) UNUSED_ ## x
+#else
+#  define UNUSED_FUNCTION(x) UNUSED_ ## x
+#endif
+
+// #define UNUSED(x) (void)(x)
+
 #define MAX_INPUT  32
-#define MAX_STACK  16
-#define MAX_RSTACK 4
+#define MAX_STACK  32  // stack + return stack
 #define MAX_MEM    16
-#define MAX_TIMERS 8
+#define MAX_TIMERS 16
 #define NUM_TBYTES  ((MAX_TIMERS+7)>>3)
 #define NUM_IBYTES  ((MAX_INPUT+7)>>3)
 
@@ -179,15 +192,13 @@ typedef enum {
 	OPOP(SWAP,DROP), ZLT, JOP8(JMP,6), SUB, S_ZLE
 
 // Failure codes
-#define FAIL_STACK_OVERFLOW    -1
-#define FAIL_STACK_UNDERFLOW   -2
-#define FAIL_RSTACK_OVERFLOW   -3
-#define FAIL_RSTACK_UNDERFLOW  -4
-#define FAIL_DIV_ZERO          -5
-#define FAIL_TIMER_OVERFLOW    -6
-#define FAIL_MEMORY_OVERFLOW   -7
-#define FAIL_INVALID_ARGUMENT  -8
-#define FAIL_INVALID_OPCODE    -9
+#define FAIL_INVALID_ARGUMENT  -1
+#define FAIL_INVALID_OPCODE    -2
+#define FAIL_STACK_OVERFLOW    -3
+#define FAIL_STACK_UNDERFLOW   -4
+#define FAIL_TIMER_OVERFLOW    -9
+#define FAIL_INVALID_MEMORY_ADDRESS    -9
+#define FAIL_DIV_ZERO          -10
 
 // SYSTEM CALLS
 typedef enum {
@@ -251,19 +262,20 @@ typedef struct _chine_t
 	       cell_t* npop, cell_t* reason);
     uint8_t* prog;                // program area
     cell_t   stack[MAX_STACK];    // stack
-    cell_t   rstack[MAX_RSTACK];  // call stack (relative addresses etc)
     cell_t   mem[MAX_MEM];        // local store
     uint8_t  imask[NUM_IBYTES];   // input mask
     uint8_t  tbits[NUM_TBYTES];   // timer running bits
     uint8_t  tmask[NUM_TBYTES];   // selected timers
-    timeout_t timer[MAX_TIMERS];   // timers
+    timeout_t timer[MAX_TIMERS];  // timers
 } chine_t;
 
 extern void chine_init(chine_t* mp, uint8_t* prog, 
 		       int  (*sys)(chine_t* mp,
 				   cell_t sysop, cell_t* revarg,
 				   cell_t* npop, cell_t* reason));
+extern int chine_final(chine_t* mp);
 extern int chine_run(chine_t* mp);
+
 extern timeout_t chine_millis(void);
 extern timeout_t chine_micros(void);
 extern int chine_next(chine_t* mp, timeout_t* tmop, uint8_t* imask);

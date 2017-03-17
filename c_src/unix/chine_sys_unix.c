@@ -184,9 +184,9 @@ int chine_unix_sys(chine_t* mp,
 	*npop = 2;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
 	switch(k) {
-	case INPUT_BOOLEAN: *value = input[i].digital;
-	case INPUT_ANALOG:  *value = input[i].analog;
-	case INPUT_ENCODER: *value = input[i].encoder;
+	case INPUT_BOOLEAN: *value = input[i].digital; break;
+	case INPUT_ANALOG:  *value = input[i].analog; break;
+	case INPUT_ENCODER: *value = input[i].encoder; break;
 	default: return FAIL_INVALID_ARGUMENT;
 	}
 	return 1;
@@ -199,9 +199,9 @@ int chine_unix_sys(chine_t* mp,
 	*npop = 3;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
 	switch(k) {
-	case INPUT_BOOLEAN: output[i].digital = n;
-	case INPUT_ANALOG:  output[i].analog = n;
-	case INPUT_ENCODER: output[i].encoder = n;
+	case INPUT_BOOLEAN: output[i].digital = n; break;
+	case INPUT_ANALOG:  output[i].analog = n;  break;
+	case INPUT_ENCODER: output[i].encoder = n; break;
 	default: return FAIL_INVALID_ARGUMENT;
 	}
 	return 1;
@@ -274,78 +274,67 @@ int chine_unix_sys(chine_t* mp,
 	return 1;
     }
     case SYS_GPIO_INPUT: {
-	int i = revarg[0];
-	TRACEF("gpio_input(%d)",i);
+	TRACEF("gpio_input(%d)", revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
-	pinMode(i, INPUT);
+	pinMode(revarg[0], INPUT);
 #endif
 	return 0;
     }
     case SYS_GPIO_OUTPUT: {
-	int i = revarg[0];
-	TRACEF("gpio_output(%d)",i);
+	TRACEF("gpio_output(%d)",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
-	pinMode(i, OUTPUT);
+	pinMode(revarg[0], OUTPUT);
 #endif
 	return 0;
     }
     case SYS_GPIO_SET: {
-	int i = revarg[0];
-	TRACEF("gpio_set(%d)",i);
+	TRACEF("gpio_set(%d)",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
-	digitalWrite(i, HIGH);
+	digitalWrite(revarg[0], HIGH);
 #endif
 	return 0;
     }
     case SYS_GPIO_CLR: {
-	int i = revarg[0];
-	TRACEF("gpio_clr(%d)",i);
+	TRACEF("gpio_clr(%d)",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
-	digitalWrite(i, LOW);
+	digitalWrite(revarg[0], LOW);
 #endif
 	return 0;
     }
     case SYS_GPIO_GET: {
-	int i = revarg[0];
-	TRACEF("gpio_get(%d)",i);
+	TRACEF("gpio_get(%d)",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
-	*value = digitalRead(i);
+	*value = digitalRead(revarg[0]);
 #else
 	*value = 0;
 #endif
 	return 1;
     }
     case SYS_ANALOG_SEND: {
-	int i   = revarg[1];
-	int val = revarg[0];
 	*npop = 2;
-	TRACEF("analog_send(%d,%u)",i,val);
+	TRACEF("analog_send(%d,%u)",revarg[1],revarg[0]);
 #if defined(WIRINGPI)
-	analogWrite(i,val>>8);
+	analogWrite(revarg[1],revarg[0]>>8);
 #endif
 	return 0;
     }
     case SYS_ANALOG_RECV: {
-	int i = revarg[0];
 	*npop = 1;
-	TRACEF("analog_recv(%d)",i);
+	TRACEF("analog_recv(%d)",revarg[0]);
 #if defined(WIRINGPI)
-	*value = analogRead(i)<<6;
+	*value = analogRead(revarg[0])<<6;
 #else
 	*value = 0;
 #endif
 	return 1;
     }
     case SYS_CAN_SEND: {
-	cell_t n     = revarg[0];	
-	int    index = revarg[1];	
-	int    si    = revarg[2];
-	TRACEF("can_send(%04x,%d,%d)",index,si,n);
+	TRACEF("can_send(%04x,%d,%d)",revarg[1],revarg[2],revarg[0]);
 	*npop = 3;
 	return 0;
     }

@@ -21,6 +21,21 @@
 
 #include "../include/chine.h"
 
+// prog header looks like:
+// 'C','H','I','N',
+// crc-32             calculated over header + code with crc set to 0
+// offset-init:32     init routine     or 0xffffffff if not used
+// offset-final:32    clean up routine or 0xffffffff if not used
+// offset-run:32      main routine     or 0xffffffff if not used
+// code ...
+// 
+// offsets are from code area below header
+// maybe add a dictionary? 
+// 4,'i','n','i','t',<n>,offset
+// 5,'f','i','n','a','l',<n>,offset
+// 3,'r','u','n',<n>,offset,
+//
+// 
 void chine_init(chine_t* mp, uint8_t* prog,
 		int (*sys)(chine_t* mp,
 			   cell_t sysop, cell_t* revarg,
@@ -29,8 +44,8 @@ void chine_init(chine_t* mp, uint8_t* prog,
     mp->prog = prog;
     mp->sys  = sys;
     mp->cIP = mp->prog;
-    mp->cSP = mp->stack+MAX_STACK;
-    mp->cRP = mp->rstack+MAX_RSTACK;
+    mp->cSP = mp->stack+MAX_STACK;  // towards low address
+    mp->cRP = mp->stack;            // towards high address
     memset(mp->tbits, 0, sizeof(mp->tbits));
     memset(mp->tmask, 0, sizeof(mp->tmask));
     memset(mp->imask, 0, sizeof(mp->imask));
@@ -255,6 +270,9 @@ static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
 #define SWITCH() do {				\
 	N = &&next;				\
     next:					\
+	if (cRP < mp->stack) fail(FAIL_STACK_UNDERFLOW);		\
+	if (cSP > mp->stack+MAX_STACK) fail(FAIL_STACK_UNDERFLOW);	\
+	if (cRP >= cSP) fail(FAIL_STACK_OVERFLOW);			\
 	TRACEF("%04u: ", (int)(cIP - mp->prog));	\
 	I = *cIP++;					\
 	switch(I >> 6) {				\
@@ -281,19 +299,22 @@ static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
 #define SWITCH_DATA()				\
     int J
 
-#define SWITCH()					\
-next:							\
-    TRACEF("%04u: ", (int)(cIP - mp->prog));		\
-    I = *cIP++;						\
-    switch(I>>6) {					\
-    case 0: J=I&31; break;         			\
-    case 1: J=(I&7)+32; break;				\
-    case 2: J=(I&7)+32; break;				\
-    case 3: J=I&7; break;				\
-    }							\
-next1:							\
-    switch(J) {						\
-    default: fail(FAIL_INVALID_OPCODE)
+#define SWITCH()							\
+    next:								\
+    TRACEF("%04u: ", (int)(cIP - mp->prog));				\
+    if (cRP < mp->stack) fail(FAIL_STACK_UNDERFLOW);			\
+    if (cSP > mp->stack+MAX_STACK) fail(FAIL_STACK_UNDERFLOW);		\
+    if (cRP >= cSP) fail(FAIL_STACK_OVERFLOW);				\
+    I = *cIP++;								\
+    switch(I>>6) {							\
+    case 0: J=I&31; break;						\
+    case 1: J=(I&7)+32; break;						\
+    case 2: J=(I&7)+32; break;						\
+    case 3: J=I&7; break;						\
+    }									\
+next1:									\
+switch(J) {								\
+   default: fail(FAIL_INVALID_OPCODE)
 
 
 #define ENDCASE() }
@@ -344,7 +365,7 @@ JCASE(JNEXT): {
 	int j;
 	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
 	cIP += j;
-	if (--cRP[0]>0) cIP += A; else cRP++;
+	if (--(cRP[-1])>0) cIP += A; else cRP--;
 	END(JNEXT,"next",0,0);
     }
 
@@ -371,7 +392,7 @@ JCASE(CALL): {
 	int j;
 	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
 	cIP += j;
-	*--cRP = (cIP - mp->prog);
+	*cRP++ = (cIP - mp->prog);
 	cIP += A;
 	END(CALL,"call",0,0);
     }
@@ -531,7 +552,7 @@ CASE(SHFT): { // shift left (or right)
 CASE(STORE): {
 	BEGIN(STORE,"!",2,0);
 	cell_t i = cSP[0];
-	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_MEMORY_OVERFLOW);
+	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
 	mp->mem[i] = cSP[1];
 	cSP += 2;
 	END(STORE,"!",2,0);
@@ -540,32 +561,32 @@ CASE(STORE): {
 CASE(FETCH): {
 	BEGIN(FETCH,"@",1,1);
 	cell_t i = cSP[0];
-	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_MEMORY_OVERFLOW);
+	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
 	cSP[0] = mp->mem[i]; 
 	END(FETCH,"@",1,1);
     }
 
 CASE(TOR): {
 	BEGIN(TOR,">r",1,0);
-	*--cRP = *cSP++;
+	*cRP++ = *cSP++;
 	END(TOR,">r",1,0);
     }
 
 CASE(FROMR): {
 	BEGIN(FROMR,"r>",0,1);
-	*--cSP = *cRP++;
+	*--cSP = *--cRP;
 	END(FROMR,"r>",0,1);
     }
 
 CASE(RFETCH): {
 	BEGIN(RFETCH,"r@",0,1);
-	*--cSP = cRP[0];
+	*--cSP = cRP[-1];
 	END(RFETCH,"r@",0,1);
     }
 
 CASE(EXIT): {
 	BEGIN(EXIT,"exit",0,0);
-	cIP = mp->prog + *cRP++;
+	cIP = mp->prog + *--cRP;
 	END(EXIT,"exit",0,0);
     }
 
@@ -627,7 +648,7 @@ CASE(EXEC): {
 	BEGIN(EXEC,"execute",1,0);
 	// place a call to the location given by addr on top of stack
 	// the address is a location relative to program start
-	*--cRP = (cIP - mp->prog);  // save return address
+	*cRP++ = (cIP - mp->prog);  // save return address
 	cIP = mp->prog + *cSP++;
 	END(EXEC,"execute",1,0);
     }

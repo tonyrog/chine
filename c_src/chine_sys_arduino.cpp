@@ -20,18 +20,6 @@ uint32_t param_wait[MAX_TIMERS];
 uint32_t param_rampup[MAX_TIMERS];
 uint32_t param_rampdown[MAX_TIMERS];
 
-struct _input_t {
-    uint8_t  digital;
-    uint16_t analog;
-    int16_t  encoder;
-} input[32];
-
-struct _output_t {
-    uint8_t  digital;
-    uint16_t analog;
-    int16_t  encoder;
-} output[32];
-
 // time since program started in ms
 uint32_t chine_micros(void)
 {
@@ -138,24 +126,25 @@ int chine_arduino_sys(chine_t* mp,
 	cell_t i = revarg[1];
 	*npop = 2;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
+	// add more input possiblilties 
 	switch(k) {
-	case INPUT_BOOLEAN: *value = input[i].digital;
-	case INPUT_ANALOG:  *value = input[i].analog;
-	case INPUT_ENCODER: *value = input[i].encoder;
+	case INPUT_BOOLEAN: *value = digitalRead(i); break;
+	case INPUT_ANALOG:  *value = analogRead(i)<<6; break;
+	case INPUT_ENCODER: *value = 0; break; 
 	default: return FAIL_INVALID_ARGUMENT;
 	}
 	return 1;
     }
-    case SYS_OUTPUT_STORE: {  // ( i k n -- )
-	cell_t n = revarg[0];
-	cell_t k = revarg[1];
-	cell_t i = revarg[2];
+    case SYS_OUTPUT_STORE: {  // ( n i k -- )
+	cell_t k = revarg[0];
+	cell_t i = revarg[1];
+	cell_t n = revarg[2];
 	*npop = 3;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
 	switch(k) {
-	case INPUT_BOOLEAN: output[i].digital = n;
-	case INPUT_ANALOG:  output[i].analog = n;
-	case INPUT_ENCODER: output[i].encoder = n;
+	case INPUT_BOOLEAN: digitalWrite(i, n ? HIGH : LOW); break;
+	case INPUT_ANALOG:  analogWrite(i, n>>8); break;
+	case INPUT_ENCODER: break;
 	default: return FAIL_INVALID_ARGUMENT;
 	}
 	return 1;
@@ -194,9 +183,8 @@ int chine_arduino_sys(chine_t* mp,
 	return 0;
     }
     case SYS_UART_SEND: {
-	cell_t c = revarg[0];
 	*npop = 1;
-	Serial.write(c);
+	Serial.write(revarg[0]);
 	return 0;
     }
     case SYS_UART_AVAIL: {
@@ -210,46 +198,38 @@ int chine_arduino_sys(chine_t* mp,
 	return 1;
     }
     case SYS_GPIO_INPUT: {
-	int i = revarg[0];
 	*npop = 1;
-	pinMode(i, INPUT);
+	pinMode(revarg[0], INPUT);
 	return 0;
     }
     case SYS_GPIO_OUTPUT: {
-	int i = revarg[0];
 	*npop = 1;
-	pinMode(i, OUTPUT);
+	pinMode(revarg[0], OUTPUT);
 	return 0;
     }
     case SYS_GPIO_SET: {
-	int i = revarg[0];
 	*npop = 1;
-	digitalWrite(i, HIGH);
+	digitalWrite(revarg[0], HIGH);
 	return 0;
     }
     case SYS_GPIO_CLR: {
-	int i = revarg[0];
 	*npop = 1;
-	digitalWrite(i, LOW);
+	digitalWrite(revarg[0], LOW);
 	return 0;
     }
     case SYS_GPIO_GET: {
-	int i = revarg[0];
 	*npop = 1;
-	*value = digitalRead(i);
+	*value = digitalRead(revarg[0]);
 	return 1;
     }
     case SYS_ANALOG_SEND: {
-	int i   = revarg[1];
-	int val = revarg[0];
 	*npop = 2;
-	analogWrite(i,val>>8);
+	analogWrite(revarg[1],revarg[0]>>8);
 	return 0;
     }
     case SYS_ANALOG_RECV: {
-	int i = revarg[0];
 	*npop = 1;
-	*value = analogRead(i)<<6;
+	*value = analogRead(revarg[0])<<6;
 	return 1;
     }
     default:
