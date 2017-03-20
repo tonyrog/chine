@@ -1,0 +1,10 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%% @author Tony Rogvall <tony@rogvall.se>
+%%% @copyright (C) 2017, Tony Rogvall
+%%% @doc
+%%%    Start chine compiler
+%%% @end
+
+main(Args) ->
+    chine:start(Args).
