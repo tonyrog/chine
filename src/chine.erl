@@ -84,9 +84,11 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 			 [length(Sym),Sym,LenValue,BinValue]
 		     end || {Sym,Value} <- SymTab],
 		SymbolTableBin = list_to_binary(SymbolEntries),
-		File0 = file_sections(SymbolTableBin,0,Bin),
+		{File0,_Length} = file_sections(SymbolTableBin,0,Bin),
 		CRC = erlang:crc32(File0),
-		file_sections(SymbolTableBin,CRC,Bin);
+		%% io:format("CRC = ~w, Len=~w\n", [CRC,Length]),
+		{File1,_} = file_sections(SymbolTableBin,CRC,Bin),
+		File1;
 	    c ->
 		[[begin
 		   ["#define SYM_",Sym," ",integer_to_list(Value),"\n"]
@@ -137,7 +139,7 @@ file_sections(SymbolTable,CRC,Content) ->
     SymbolTableLen = byte_size(SymbolTable),
     ContentLen = byte_size(Content),
     Length = 4 + 4 + SymbolTableLen + 4 + 4 + ContentLen,
-    [$C,$H,$I,$N,
+    {[$C,$H,$I,$N,
      <<?FILE_VERSION:32>>,
      <<CRC:32>>,
      <<Length:32>>,
@@ -146,7 +148,7 @@ file_sections(SymbolTable,CRC,Content) ->
      SymbolTable,
      $C,$O,$D,$E,
      <<ContentLen:32>>,
-     Content].
+     Content], Length}.
 
 symbol_table(Symbols, Labels) ->
     %% io:format("Symbols = ~p, labels = ~p\n",[Symbols, Labels]),

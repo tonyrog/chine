@@ -289,7 +289,7 @@ static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
 #elif defined(DISPATCH_WITH_SWITCH)
 
 #define SWITCH_DATA()				\
-    int J
+    int J = 0
 
 #define SWITCH()							\
     next:								\

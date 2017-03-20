@@ -6,7 +6,8 @@
 
 #include "../../include/chine.h"
 
-#define DEBUG(...) printf(__VA_ARGS__)
+// #define DEBUG(...) printf(__VA_ARGS__)
+#define DEBUG(...)
 
 chine_t m;
 
@@ -16,22 +17,83 @@ extern int32_t chine_unix_sys(chine_t* mp,
 
 char data[65537];
 
-// return pointer to symbol table
-uint8_t* file_header(uint8_t* ptr, uint32_t* crcp, uint8_t** symb_end)
-{
-    uint32_t totlen;
-    uint32_t symblen;
+// Standard CRC-32
+#define CRC32_POLY 0xEDB88320
 
+typedef struct {
+    uint32_t crc;
+} crc_32_ctx_t;
+
+void crc32_init(crc_32_ctx_t* p)
+{
+    p->crc = (uint32_t) -1;
+}
+
+uint32_t crc32_final(crc_32_ctx_t* p)
+{
+    return ~p->crc;
+}
+
+void crc32_update(crc_32_ctx_t* p, uint8_t* data, size_t len)
+{
+    uint32_t crc = p->crc;
+
+   while (len--) {
+       uint32_t byte = *data++;
+       int j;
+       crc = crc ^ byte;
+       for (j = 7; j >= 0; j--) {    // Do eight times.
+	   uint32_t mask = -(crc & 1);
+	   crc = (crc >> 1) ^ (CRC32_POLY & mask);
+       }
+   }
+   p->crc = crc;
+}
+
+uint32_t crc32(uint8_t* data, size_t len)
+{
+    crc_32_ctx_t param;
+
+    crc32_init(&param);
+    crc32_update(&param, data, len);
+    return crc32_final(&param);
+}
+
+
+
+// return pointer to symbol table
+uint8_t* file_header(uint8_t* ptr, uint8_t** symb_end)
+{
+    uint32_t length;
+    uint32_t symblen;
+    uint32_t crc, crc2;
+    uint32_t zero = 0;
+    crc_32_ctx_t ctx;
+    uint8_t* ptr0 = ptr;
+    
     if (memcmp(ptr, "CHIN", 4) != 0)
 	return NULL;
     ptr += 4;
     if ((ptr[0] != FILE_VERSION_MAJOR) || (ptr[1] != FILE_VERSION_MINOR) )
 	return NULL;
     ptr += 4;
-    *crcp = UINT32(ptr);
+    crc = UINT32(ptr);
     ptr += 4;
-    totlen = UINT32(ptr);
+    length = UINT32(ptr);
     ptr += 4;
+
+    // printf("crc=%u, length=%d\n", crc, length);
+
+    crc32_init(&ctx);
+    crc32_update(&ctx, (uint8_t*)ptr0, 8);              // magic + version
+    crc32_update(&ctx, (uint8_t*)&zero, sizeof(zero));  // crc=0
+    crc32_update(&ctx, ptr-4, length + 4);
+    crc2 = crc32_final(&ctx);
+    if (crc2 != crc) {
+	fprintf(stderr, "file_header: bad_crc, computed = %u\n", crc2);
+	return NULL;
+    }
+
     if (memcmp(ptr, "SYMB", 4) != 0)
 	return NULL;
     ptr += 4;
@@ -98,7 +160,6 @@ int main(int argc, char** argv)
     uint8_t* symb_end;
     uint8_t* code_start;
     uint8_t* code_end;
-    uint32_t crc;
 
     if ((f = fopen(argv[1], "rb")) == NULL) {
 	fprintf(stderr, "chine_exec: unable to open file [%s] %s\n",
@@ -114,7 +175,7 @@ int main(int argc, char** argv)
 
     chine_init(&m, (uint8_t*)data, chine_unix_sys);
 
-    if ((symb_start = file_header((uint8_t*)data, &crc, &symb_end)) == NULL) {
+    if ((symb_start = file_header((uint8_t*)data, &symb_end)) == NULL) {
 	fprintf(stderr, "chine_exec: file format error\n");
 	exit(1);
     }
