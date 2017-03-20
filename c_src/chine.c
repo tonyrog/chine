@@ -39,9 +39,9 @@ void chine_init(chine_t* mp, uint8_t* prog,
 }
 
 // Set execution pointer
-void chine_set_ip(chine_t* mp, uint8_t* ip)
+void chine_set_ip(chine_t* mp, int offset)
 {
-    mp->cIP = ip;
+    mp->cIP = mp->prog + offset;
 }
 
 // calculcuate next timeout,
@@ -578,6 +578,11 @@ CASE(RFETCH): {
 
 CASE(EXIT): {
 	BEGIN(EXIT,"exit",0,0);
+	if (cRP == mp->stack) {
+	    SWAP_OUT(mp);
+	    TEND(EXIT,"exit",0,0);
+	    return 0;
+	}
 	cIP = mp->prog + *--cRP;
 	END(EXIT,"exit",0,0);
     }

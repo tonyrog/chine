@@ -268,7 +268,7 @@ extern void chine_init(chine_t* mp, uint8_t* prog,
 extern int chine_final(chine_t* mp);
 extern int chine_run(chine_t* mp);
 
-extern void chine_set_ip(chine_t* mp, uint8_t* ip);
+extern void chine_set_ip(chine_t* mp, int offset);
 
 extern timeout_t chine_millis(void);
 extern timeout_t chine_micros(void);

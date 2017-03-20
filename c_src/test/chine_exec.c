@@ -9,6 +9,12 @@
 // #define DEBUG(...) printf(__VA_ARGS__)
 #define DEBUG(...)
 
+#ifdef TRACE
+#define TRACEF(...) printf(__VA_ARGS__)
+#else
+#define TRACEF(...)
+#endif
+
 chine_t m;
 
 extern int32_t chine_unix_sys(chine_t* mp,
@@ -142,6 +148,7 @@ int lookup(uint8_t* symb_start, uint8_t* symb_end, char* symbol)
 	    case 4: offset = INT32(vptr); break;
 	    default: return -1;
 	    }
+	    TRACEF("symbol %.*s offset %d\n", sn, sptr, offset);
 	    DEBUG("found offst = %d\n", offset);
 	    return offset;
 	}
@@ -173,8 +180,6 @@ int main(int argc, char** argv)
     }
     fclose(f);
 
-    chine_init(&m, (uint8_t*)data, chine_unix_sys);
-
     if ((symb_start = file_header((uint8_t*)data, &symb_end)) == NULL) {
 	fprintf(stderr, "chine_exec: file format error\n");
 	exit(1);
@@ -184,8 +189,10 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
+    chine_init(&m, (uint8_t*)code_start, chine_unix_sys);
+
     if ((offset = lookup(symb_start, symb_end, "init")) >= 0) {
-	chine_set_ip(&m, code_start + offset);
+	chine_set_ip(&m, offset);
 	if (chine_run(&m) < 0) {
 	    fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
 	    exit(1);
@@ -196,7 +203,7 @@ int main(int argc, char** argv)
 	fprintf(stderr, "chine_exec: [%s] nothing to run\n", argv[1]);
 	exit(1);
     }
-    chine_set_ip(&m, code_start + offset);
+    chine_set_ip(&m, offset);
 
 again:
     if (chine_run(&m) < 0) {
@@ -213,7 +220,7 @@ again:
 	}
     }
     if ((offset = lookup(symb_start, symb_end, "final")) >= 0) {
-	chine_set_ip(&m, code_start + offset);
+	chine_set_ip(&m, offset);
 	if (chine_run(&m) < 0) {
 	    fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
 	    exit(1);
