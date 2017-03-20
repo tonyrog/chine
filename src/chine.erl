@@ -58,14 +58,14 @@ do_input(File, Opts) ->
 		    do_emit(AsmResult, Opts)
 	    catch
 		error:Reason ->
-		    io:format("~s:error: ~w\n~p", 
+		    io:format("~s:error: ~p\n~p", 
 			      ["chin_compile", Reason,
 			       erlang:get_stacktrace()
 			      ]),
 		    halt(1)
 	    end;
 	{error,Reason} ->
-	    io:format("~s:error: ~w\n", 
+	    io:format("~s:error: ~p\n", 
 		      ["chin_compile", Reason]),
 	    halt(1)
     end.
@@ -114,7 +114,7 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 			    halt(0)
 		    end;
 		{error,Reason} ->
-		    io:format("~s:error: ~w\n", 
+		    io:format("~s:error: ~p\n", 
 			      ["chin", Reason]),
 		    halt(1)
 	    end
@@ -403,7 +403,7 @@ expand_synth_([{Jop,L}|Code],Acc,Sym) when
 expand_synth_([Op={const,C}|Code],Acc,Sym) when is_integer(C) ->
     expand_synth_(Code,[Op|Acc],Sym);
 expand_synth_([{const,E}|Code],Acc,Sym) ->
-    case maps:find(E, Sym) of
+    case maps:find({enum,E}, Sym) of
 	{ok,C} ->
 	    expand_synth_(Code,[{const,C}|Acc],Sym);
 	error ->
