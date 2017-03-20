@@ -248,7 +248,8 @@ int chine_unix_sys(chine_t* mp,
 	uint8_t c = revarg[0];
 	TRACEF("uart_send(%d)", c);
 	*npop = 1;
-	write(1, &c, 1);
+	if (write(1, &c, 1) < 0)
+	    return FAIL_INVALID_ARGUMENT;
 	return 0;
     }
     case SYS_UART_AVAIL: {
