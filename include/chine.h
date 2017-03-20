@@ -23,10 +23,14 @@ extern "C" {
 #  define UNUSED_FUNCTION(x) UNUSED_ ## x
 #endif
 
+#define FILE_VERSION_MAJOR 1
+#define FILE_VERSION_MINOR 1
+#define FILE_VERSION_PATCH 0
+
 // #define UNUSED(x) (void)(x)
 
 #define MAX_INPUT  32
-#define MAX_STACK  32  // stack + return stack
+#define MAX_STACK  16  // stack + return stack
 #define MAX_MEM    16
 #define MAX_TIMERS 16
 #define NUM_TBYTES  ((MAX_TIMERS+7)>>3)
@@ -239,18 +243,6 @@ typedef enum {
 #define INPUT_ANALOG  1
 #define INPUT_ENCODER 2
 
-// Program normally should look something like
-// {array,[Main,Init,Final]},'jmp*',
-// {label,Init}
-//   <init code>
-//   ret
-// {label,Final
-//   <cleanup code>
-//   ret
-// {label,Main}
-//   <main code>
-//
-
 typedef struct _chine_t
 {
     uint8_t* cIP;
@@ -275,6 +267,8 @@ extern void chine_init(chine_t* mp, uint8_t* prog,
 				   cell_t* npop, cell_t* reason));
 extern int chine_final(chine_t* mp);
 extern int chine_run(chine_t* mp);
+
+extern void chine_set_ip(chine_t* mp, uint8_t* ip);
 
 extern timeout_t chine_millis(void);
 extern timeout_t chine_micros(void);

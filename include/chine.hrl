@@ -1,6 +1,8 @@
 -ifndef(__CHINE_HRL__).
 -define(__CHINE_HRL__, true).
 
+-define(FILE_VERSION, 16#01010000).
+
 -define(OPCODE0(OP),     (16#00 bor ((OP) band 31))).
 %% K = 0 (1 byte arg) 1 = (2 byte arg)  3 = (4 bytes arg)
 -define(OPCODE1(JOP,K),  (16#40 bor ((JOP) band 7) bor (((K) band 7) bsl 3))).

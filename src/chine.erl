@@ -54,12 +54,14 @@ do_input(File, Opts) ->
 	{ok,Ls0} ->
 	    Ls = lists:flatten(Ls0),
 	    try asm_list(Ls,Opts) of
-		Bin ->
-		    do_emit(Bin, Opts)
+		AsmResult ->
+		    do_emit(AsmResult, Opts)
 	    catch
 		error:Reason ->
-		    io:format("~s:error: ~w\n", 
-			      ["chin_compile", Reason]),
+		    io:format("~s:error: ~w\n~p", 
+			      ["chin_compile", Reason,
+			       erlang:get_stacktrace()
+			      ]),
 		    halt(1)
 	    end;
 	{error,Reason} ->
@@ -68,20 +70,35 @@ do_input(File, Opts) ->
 	    halt(1)
     end.
 
-do_emit(Bin, Opts) ->
+do_emit({Bin,Symbols,Labels}, Opts) ->
     Format = proplists:get_value(format,Opts,binary),
-    Output = case Format of
-		 binary -> 
-		     binary_to_list(Bin);
-		 c ->
-		     [io_lib:format("// program size=~w, sha=~s\n",
-				    [byte_size(Bin),hex(crypto:hash(sha,Bin))]),
-		      io_lib:format("unsigned char prog[] = {\n  ~s };\n",
-				    [cformat(Bin,1)])]
-	     end,
+    SymTab = symbol_table(Symbols,Labels),
+    %% io:format("SymTab = ~p\n", [SymTab]),
+    Output = 
+	case Format of
+	    binary ->
+		SymbolEntries =
+		    [begin
+			 BinValue = encode_symbol_value(Value),
+			 LenValue = byte_size(BinValue),
+			 [length(Sym),Sym,LenValue,BinValue]
+		     end || {Sym,Value} <- SymTab],
+		SymbolTableBin = list_to_binary(SymbolEntries),
+		File0 = file_sections(SymbolTableBin,0,Bin),
+		CRC = erlang:crc32(File0),
+		file_sections(SymbolTableBin,CRC,Bin);
+	    c ->
+		[[begin
+		   ["#define SYM_",Sym," ",integer_to_list(Value),"\n"]
+		  end || {Sym,Value} <- SymTab],
+		 io_lib:format("// program size=~w, sha=~s\n",
+			       [byte_size(Bin),hex(crypto:hash(sha,Bin))]),
+		 io_lib:format("unsigned char prog[] = {\n  ~s };\n",
+			       [cformat(Bin,1)])]
+	end,
     case proplists:get_value(output, Opts) of
 	undefined ->
-	    io:put_chars(Output),
+	    file:write(user,Output),
 	    halt(0);
 	File ->
 	    case file:write_file(File, Output) of
@@ -116,22 +133,57 @@ hex(Bin) ->
     [ element(I+1,{$0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$a,$b,$c,$d,$e,$f}) 
       || <<I:4>> <= Bin].
 
+file_sections(SymbolTable,CRC,Content) ->
+    SymbolTableLen = byte_size(SymbolTable),
+    ContentLen = byte_size(Content),
+    Length = 4 + 4 + SymbolTableLen + 4 + 4 + ContentLen,
+    [$C,$H,$I,$N,
+     <<?FILE_VERSION:32>>,
+     <<CRC:32>>,
+     <<Length:32>>,
+     $S,$Y,$M,$B,
+     <<SymbolTableLen:32>>,
+     SymbolTable,
+     $C,$O,$D,$E,
+     <<ContentLen:32>>,
+     Content].
+
+symbol_table(Symbols, Labels) ->
+    %% io:format("Symbols = ~p, labels = ~p\n",[Symbols, Labels]),
+    lists:foldl(
+      fun(L, Acc) ->
+	      case maps:find(L, Labels) of
+		  error ->
+		      io:format("warning: exported label ~s not found\n", [L]),
+		      Acc;
+		  {ok,[Addr]} ->
+		      [{encode_symbol_name(L), Addr}|Acc]
+	      end
+      end, [], [L || {{export,L},_} <- maps:to_list(Symbols)]).
+
+encode_symbol_value(Value) when Value >= 0 ->
+    if Value < -16#8000; Value > 16#7fff -> <<Value:32>>;
+       Value < -16#80; Value > 16#7f ->  <<Value:16>>;
+       true -> <<Value:8>>
+    end.
+
+encode_symbol_name(Name) ->
+    binary_to_list(iolist_to_binary(Name)).
 
 asm_list(Code,Opts) ->
-    transform(
-      [fun expand_synthetic/2,  %% replace if and built ins
-       fun encode_const/2 ,     %% generate byte code for constants
-       fun collect_blocks/2,    %% collect basic blocks
-       fun resolve_labels/2,    %% calculate all offsets
-       fun disperse_blocks/2,   %% inject blocks
-       fun encode_opcodes/2], Code, Opts).
+    {Code1,Symbols} = expand_synthetic(Code,Opts),
+    debugf(Opts, "pass: synthetic ~p\n", [Code1]),
+    Code2 = encode_const(Code1,Opts),
+    debugf(Opts, "pass: const ~p\n", [Code2]),
+    Code3 = collect_blocks(Code2,Opts),
+    debugf(Opts, "pass: collect ~p\n", [Code3]),
+    {Code4,Labels} = resolve_labels(Code3,Opts),
+    debugf(Opts, "pass: resolved ~p\n", [Code4]),
+    Code5 = disperse_blocks(Code4,Opts),
+    debugf(Opts, "pass: disperse ~p\n", [Code5]),
+    Code6 = encode_opcodes(Code5,Opts),
+    {Code6,Symbols,Labels}.
 
-transform([F|Fs], Code, Opts) ->
-    debugf(Opts, "Code = ~p\n", [Code]),
-    transform(Fs, F(Code,Opts), Opts);
-transform([], Code, Opts) ->
-    debugf(Opts, "Code = ~p\n", [Code]),
-    Code.
 
 debugf(Opts,Fmt,As) ->
     case lists:member(debug, Opts) of
@@ -306,89 +358,110 @@ synthetic_opcodes() ->
      }.
 
 expand_synthetic(Code,_Opts) ->
-    lists:flatten(expand_synth_(Code, #{})).
+    expand_synth_(Code,[],#{}).
 
-expand_synth_([{'if',Then}|Code],Sym) ->
+expand_synth_([{'if',Then}|Code],Acc,Sym) ->
     L = new_label(),
-    [{{jop,jmpz},L}, expand_synth_(Then,Sym), {label,L} | 
-     expand_synth_(Code,Sym)];
-expand_synth_([{'if',Then,Else}|Code],Sym) ->
+    Block = [{{jop,jmpz},L},Then,{label,L}],
+    expand_synth_(Block ++ Code,Acc,Sym);
+expand_synth_([{'if',Then,Else}|Code],Acc,Sym) ->
     L0 = new_label(),
     L1 = new_label(),
-    [{{jop,jmpz},L0}, expand_synth_(Then,Sym),{{jop,jmp},L1},
-     {label,L0}, expand_synth_(Else,Sym),{label,L1} | 
-     expand_synth_(Code,Sym)];
-expand_synth_([{'again',Loop}|Code],Sym) ->
+    Block = [{{jop,jmpz},L0},Then,{{jop,jmp},L1},
+	     {label,L0},Else,{label,L1}],
+     expand_synth_(Block++Code,Acc,Sym);
+expand_synth_([{'again',Loop}|Code],Acc,Sym) ->
     L0 = new_label(),
-    [{label,L0}, expand_synth_(Loop,Sym), {{jop,jmp},L0} | 
-     expand_synth_(Code,Sym)];
-expand_synth_([{'until',Loop}|Code],Sym) ->
+    Block = [{label,L0},Loop,{{jop,jmp},L0}],
+    expand_synth_(Block++Code,Acc,Sym);
+expand_synth_([{'until',Loop}|Code],Acc,Sym) ->
     L0 = new_label(),
-    [{label,L0}, expand_synth_(Loop,Sym), {{jop,jmpz},L0} | 
-     expand_synth_(Code,Sym)];
-expand_synth_([{'repeat',Loop,While}|Code],Sym) ->
+    Block = [{label,L0},Loop,{{jop,jmpz},L0}],
+    expand_synth_(Block++Code,Acc,Sym);
+expand_synth_([{'repeat',While,Loop}|Code],Acc,Sym) ->
     L0 = new_label(),
     L1 = new_label(),
-    [{label,L0}, expand_synth_(Loop,Sym),
-     {{jop,jmpz},L1}, expand_synth_(While,Sym),
-     {{jop,jmp},L0},{label,L1} | expand_synth_(Code,Sym)];
-expand_synth_([{'for',Loop}|Code],Sym) ->
-    %% fixme: compile to allow for exit to leave for loop
+    Block = [{label,L0},While,{{jop,jmpz},L1},
+	     Loop,{{jop,jmp},L0},{label,L1}],
+    expand_synth_(Block++Code,Acc,Sym);
+expand_synth_([{'for',Loop}|Code],Acc,Sym) ->
     L0 = new_label(),
-    ['>r',
-     {label,L0},
-     expand_synth_(Loop,Sym), %% use R@ while in loop to get loop index
-     {{jop,next},L0} | expand_synth_(Code,Sym)];
-expand_synth_([{enum,Ls}|Code], Sym) ->
+    Block = ['>r', {label,L0},Loop,{{jop,next},L0}],
+    expand_synth_(Block++Code,Acc,Sym);
+expand_synth_([{enum,Ls}|Code],Acc,Sym) ->
     Sym1 = add_enums_(Ls, 0, Sym),
-    expand_synth_(Code, Sym1);
-expand_synth_([{comment,_Comment}|Code], Sym) ->
+    expand_synth_(Code,Acc,Sym1);
+expand_synth_([{comment,_Comment}|Code],Acc,Sym) ->
     %% just a comment ignore it
-    expand_synth_(Code, Sym);
-expand_synth_([{Jop,L}|Code],Sym) when
+    expand_synth_(Code,Acc,Sym);
+expand_synth_([{Jop,L}|Code],Acc,Sym) when
       Jop =:= jmpz; Jop =:= jmpnz;
       Jop =:= next; Jop =:= jmplz;
       Jop =:= jmp; Jop =:= call ->
-    [{{jop,Jop},L} | expand_synth_(Code,Sym)];
-expand_synth_([Op={const,C}|Code],Sym) when is_integer(C) ->
-    [Op | expand_synth_(Code,Sym)];
-expand_synth_([{const,E}|Code],Sym) ->
+    L1 = normalize_label(L),
+    expand_synth_(Code,[{{jop,Jop},L1}|Acc], Sym);
+expand_synth_([Op={const,C}|Code],Acc,Sym) when is_integer(C) ->
+    expand_synth_(Code,[Op|Acc],Sym);
+expand_synth_([{const,E}|Code],Acc,Sym) ->
     case maps:find(E, Sym) of
 	{ok,C} ->
-	    [{const,C} | expand_synth_(Code,Sym)];
+	    expand_synth_(Code,[{const,C}|Acc],Sym);
 	error ->
 	    io:format("error: symbol ~p not defined\n", [E]),
-	    [{const,E} | expand_synth_(Code,Sym)]
+	    expand_synth_(Code,[{const,E} | Acc],Sym)
     end;
-expand_synth_([Op|Code],Sym) when is_tuple(Op) ->
-    [Op | expand_synth_(Code,Sym)];
-expand_synth_([Op|Code],Sym) when is_atom(Op) ->
+expand_synth_([{export,L}|Code],Acc,Sym) ->
+    L1 = normalize_label(L),
+    Sym1 = maps:put({export,L1}, 0, Sym),
+    expand_synth_(Code,Acc,Sym1);
+expand_synth_([{label,L}|Code],Acc,Sym) ->
+    L1 = normalize_label(L),
+    expand_synth_(Code,[{label,L1}|Acc],Sym);
+expand_synth_([Op|Code],Acc,Sym) when is_tuple(Op) ->
+    expand_synth_(Code,[Op|Acc],Sym);
+expand_synth_([Op|Code],Acc,Sym) when is_atom(Op) ->
     Map = synthetic_opcodes(),
     case maps:find(Op,Map) of
 	error ->
-	    [Op|expand_synth_(Code,Sym)];
+	    expand_synth_(Code,[Op|Acc],Sym);
 	{ok,Ops} when is_list(Ops) ->
-	    [expand_synth_(Ops,Sym)|expand_synth_(Code,Sym)]
+	    expand_synth_(Ops++Code,Acc,Sym)
     end;
-expand_synth_([Op|Code],Sym) when is_integer(Op) ->
-    [{const,Op} | expand_synth_(Code,Sym)];
-expand_synth_([Ops|Code],Sym) when is_list(Ops) ->
+expand_synth_([Op|Code],Acc,Sym) when is_integer(Op) ->
+    expand_synth_(Code,[{const,Op}|Acc],Sym);
+expand_synth_([[]|Code],Acc,Sym) ->
+    expand_synth_(Code,Acc,Sym);
+expand_synth_([Ops|Code],Acc,Sym) when is_list(Ops) ->
     try erlang:iolist_to_binary(Ops) of
 	Bin ->
-	    [{string,binary_to_list(Bin)}|expand_synth_(Code,Sym)]
+	    expand_synth_(Code,[{string,binary_to_list(Bin)}|Acc],Sym)
     catch
 	error:_ ->
-	    [expand_synth_(Ops,Sym)|expand_synth_(Code,Sym)]
+	    expand_synth_(Ops++Code,Acc,Sym)
     end;
-expand_synth_([],_Sym) ->
-    [].
+expand_synth_([],Acc,Sym) ->
+    {lists:reverse(Acc),Sym}.
 
 add_enums_([E|Es], I, Sym) ->
-    Sym1 = maps:put(E, I, Sym),
+    Sym1 = maps:put({enum,E}, I, Sym),
     add_enums_(Es, I+1, Sym1);
 add_enums_([], _I, Sym) ->
     Sym.
-    
+
+normalize_label(L) when is_atom(L) ->    
+    atom_to_list(L);
+normalize_label(L) when is_list(L) ->
+    try iolist_size(L) of
+	Len when Len < 256 -> L;
+	_ ->
+	    io:format("label name too long ~s\n", [L]),
+	    erlang:error({label_too_loong, L})
+    catch
+	error:_ ->
+	    io:format("label name not string ~p\n", [L]),
+	    erlang:error({label_not_string, L})
+    end.
+
 %%
 %% Replace branch labels with offsets
 %% iterate until all labels are resolved
@@ -430,8 +503,8 @@ resolve_labels_([{label,_L}|Code], Acc, Map, Addr) ->
 resolve_labels_([{block,N,Block}|Code], Acc, Map, Addr) ->
     Block1 = resolve_caddr(Block, [], Map),
     resolve_labels_(Code, [{block,N,Block1}|Acc], Map, Addr+N);
-resolve_labels_([], Acc, _Map, _Addr) ->
-    lists:reverse(Acc).
+resolve_labels_([], Acc, Map, _Addr) ->
+    {lists:reverse(Acc), Map}.
 
 %% resolve absolute addresses
 resolve_caddr([{caddr,K,L}|Code], Acc, Map) ->
@@ -873,10 +946,10 @@ new_label() ->
     case get(next_label) of
 	undefined ->
 	    put(next_label, 1),
-	    0;
+	    "L0";
 	I ->
 	    put(next_label, I+1),
-	    I
+	    [$L|integer_to_list(I)]
     end.
 
 effect_all() ->

@@ -21,21 +21,7 @@
 
 #include "../include/chine.h"
 
-// prog header looks like:
-// 'C','H','I','N',
-// crc-32             calculated over header + code with crc set to 0
-// offset-init:32     init routine     or 0xffffffff if not used
-// offset-final:32    clean up routine or 0xffffffff if not used
-// offset-run:32      main routine     or 0xffffffff if not used
-// code ...
-// 
-// offsets are from code area below header
-// maybe add a dictionary? 
-// 4,'i','n','i','t',<n>,offset
-// 5,'f','i','n','a','l',<n>,offset
-// 3,'r','u','n',<n>,offset,
-//
-// 
+// Initialize machine
 void chine_init(chine_t* mp, uint8_t* prog,
 		int (*sys)(chine_t* mp,
 			   cell_t sysop, cell_t* revarg,
@@ -43,13 +29,19 @@ void chine_init(chine_t* mp, uint8_t* prog,
 {
     mp->prog = prog;
     mp->sys  = sys;
-    mp->cIP = mp->prog;
+    mp->cIP = NULL;
     mp->cSP = mp->stack+MAX_STACK;  // towards low address
     mp->cRP = mp->stack;            // towards high address
     memset(mp->tbits, 0, sizeof(mp->tbits));
     memset(mp->tmask, 0, sizeof(mp->tmask));
     memset(mp->imask, 0, sizeof(mp->imask));
     (*sys)(mp, SYS_INIT, NULL, NULL, NULL);
+}
+
+// Set execution pointer
+void chine_set_ip(chine_t* mp, uint8_t* ip)
+{
+    mp->cIP = ip;
 }
 
 // calculcuate next timeout,

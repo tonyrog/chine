@@ -2,14 +2,21 @@
 
 %% blink with arduino leds
 
+{export,init}.
+{export,run}.
+
 [
+ {label, init},
  13,gpio_output,
  1,timer_init,
  2,timer_init,
  16#2710, 1, 500, 'param!',
  16#2710, 2, 750, 'param!',
+ yield %% exit
+].
 
- {label, loop},
+[
+ {label,run},
  13, gpio_set,
  $1, emit,
  1, timer_start,
@@ -28,5 +35,5 @@
  'not',{'if', [2, select_timer, yield, {jmp,wait2}]},
  2, deselect_timer,
 
- {jmp, loop}
+ {jmp, run}
 ].

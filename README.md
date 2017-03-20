@@ -1,4 +1,3 @@
-
 # CHINE, a pretty compact opcode scheme
 
 Chine is a byte code machine. The chine
@@ -166,3 +165,133 @@ of architectures.
 | analog_send    | ( i u16 -- )     |       |
 | analog_recv    | ( i -- u16 )     |       |
 | can_send       | ( u16 si n -- )  |       |
+
+# Source format
+
+The source format for chine code is currently in form of
+the Erlang term format. A program constist of terms of
+lists or straight terms terminated with dots.
+
+Constants are written like
+
+    {const, Integer}
+    {const, Symbol}
+    Integer             suger for {const,Integer}
+    {string, String}    suger for {array,[{const,C1},...{const,Cn}]} )
+
+Symbols may be introduced with
+
+    {enum, ["Sym1", "Sym2" ... "SymN" ]}
+
+This enumerates the symbols to values 0 ... N-1, later use
+of {const,"Sym1"} will have the same effect as enter {const,0}.
+
+    {label, L}
+
+Is a way of marking a position in the code, it may be
+used for relative or absolute addressing.
+
+    {caddr,L}
+
+Is used to create an absolute (actually relative from start of code)
+value of a label address.
+
+If a Label must be access from outside the code an export directive
+will place the label symbol and it's value in the symbol table.
+
+    {export, L} 
+
+
+Comments may be inserted as
+
+    {comment, "Text"}
+
+Or comments may be given in the source file with Erlangs % comments.
+There are a number of helpful constructs for structured programming
+constructs such as loops and if statemensts
+
+## Loops
+
+    {'if', Then}
+    {'if', Then, Else} 
+
+Note that if MUST be quoted since 'if' is a keyword in Erlang
+
+    {'again', Loop}
+    {'until', Loop}
+    {'repeat', While, Loop}
+
+In the above loops 'again' is an infine loop and 'until' evaluate the
+Loop body until the result of the Loop body is a none
+zero value. Note that the 'again' Loop body should not produce any
+stack values since none are popped in the loop by it self.
+'repeat' evaluate the code in the While part and if the
+result is none zero the Loop is executed and the loop restarts.
+
+    {'for',Loop}
+
+For implements a finte loop where the loop count is expeced on the
+stack on entry. The loop index is counted downward towards zero and
+may be fetched during the loop with 'r@'.
+
+## Arrays
+
+Arrays can be used to access data more efficent, like
+
+    {array, [{const,5},{const,7},{const,11},{const,13},{const,17}]}
+
+Is a small array of prime numbers. The array construct compiles inline
+and push the array pointer onto the stack, there is no penalty to
+loop over a array construct, just a pointer being pushed and
+the array data being skipped. So a loop over an array construct is
+perfectly ok.
+To access an item in the array the '[]' operation is used. Note that
+the '[]' operation use a zero based index.
+
+    [5, {for, [{array,[$o,$l,$l,$e,$H]},'r@','1-','[]',emit]}]
+	
+Arrays are also used for jump tables
+
+    {array, [{caddr,L1}, {caddr,L2}, ..., {caddr,Ln}]}
+
+To jump to the code and the label Li
+
+	i-1, '[]', 'jmp*'
+
+On the other hand if the array is an array of labels to functions
+then the 'execute' operation is used and control is being return after
+function is done executing.
+
+    i-1, '[]', execute
+	
+
+## Binary format
+
+The Source code is transformed compiled/assembled into a binary
+form that is divided into a couple of sections.
+
+    'C','H','I','N'
+
+is the magic 32 bit word that is used to recognise chine binary code.
+Following the magic word is a small header
+
+    Version:32     file version
+    Crc:32         crc-32 over all data (while Crc was set to zero)
+    Length:32      content length in number of bytes
+
+Length cover the rest of the sections including the crc-32.
+The Crc is calculated over all data with Crc field set to zero.
+
+symbol table section
+
+    'S','Y','M','B',
+	Length:32,
+
+Each entry in the symbol sections, looks like
+
+    Len:8, Sym:Len/binary, N:8, Value:N/binary
+
+The code follows the SYMB section in a setion called CODE
+
+	'C','O','D','E',
+	Length:32
