@@ -44,6 +44,12 @@ void chine_set_ip(chine_t* mp, int offset)
     mp->cIP = mp->prog + offset;
 }
 
+// Chine is on toplevel
+int chine_is_top_level(chine_t* mp)
+{
+    return (mp->cRP == mp->stack);
+}
+
 // calculcuate next timeout,
 // return 1 and the the update timeout value in tmop (if != NULL)
 // return 0 otherwise

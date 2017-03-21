@@ -97,7 +97,8 @@
 	  sys_gpio_get,
 	  sys_analog_send,
 	  sys_analog_recv,
-	  sys_can_send
+	  sys_can_send,
+	  sys_terminate
 	 }).
 -define(SYS(N), (#sys.X-2)).
 -define(SENUM(X), X => (#sys.X-2)).

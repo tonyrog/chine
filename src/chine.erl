@@ -274,7 +274,8 @@ syscalls() ->
        ?SENUM(sys_gpio_clr),
        ?SENUM(sys_analog_send),
        ?SENUM(sys_analog_recv),
-       ?SENUM(sys_can_send)
+       ?SENUM(sys_can_send),
+       ?SENUM(sys_terminate)
      }.
 
 %% not real opcodes, they are expanded like macros
@@ -353,6 +354,7 @@ synthetic_opcodes() ->
        analog_set    => [{sys,sys_analog_set}],
        analog_clr    => [{sys,sys_analog_clr}],
        can_send      => [{sys,sys_can_send}],
+       terminate     => [{sys,sys_terminate}],
        %% aliases
        'emit'        => [{sys,sys_uart_send}],
        'key'         => [{sys,sys_uart_recv}],

@@ -74,6 +74,10 @@ int chine_arduino_sys(chine_t* mp,
 	Serial.begin(9600);
 	return 0;
     }
+    case SYS_TERMINATE: {
+	*npop = 0;
+	return FAIL_TERMINATE;
+    }
     case SYS_PARAM_FETCH: {
 	*npop = 2;
 	return fetch(revarg[1], revarg[0], value);

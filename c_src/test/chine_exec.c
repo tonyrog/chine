@@ -203,12 +203,16 @@ int main(int argc, char** argv)
 	fprintf(stderr, "chine_exec: [%s] nothing to run\n", argv[1]);
 	exit(1);
     }
+
     chine_set_ip(&m, offset);
 
 again:
+    if (chine_is_top_level(&m))
+	chine_set_ip(&m, offset);
+
     if (chine_run(&m) < 0) {
 	fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
-	exit(1);
+	goto final;
     }
     tmo = 0xffffffff;
     memset(&imask, 0, sizeof(imask));
@@ -219,6 +223,9 @@ again:
 	    goto again;
 	}
     }
+    goto again;
+
+final:
     if ((offset = lookup(symb_start, symb_end, "final")) >= 0) {
 	chine_set_ip(&m, offset);
 	if (chine_run(&m) < 0) {

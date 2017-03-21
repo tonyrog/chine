@@ -196,13 +196,14 @@ typedef enum {
 	OPOP(SWAP,DROP), ZLT, JOP8(JMP,6), SUB, S_ZLE
 
 // Failure codes
-#define FAIL_INVALID_ARGUMENT  -1
-#define FAIL_INVALID_OPCODE    -2
-#define FAIL_STACK_OVERFLOW    -3
-#define FAIL_STACK_UNDERFLOW   -4
-#define FAIL_TIMER_OVERFLOW    -9
-#define FAIL_INVALID_MEMORY_ADDRESS    -9
-#define FAIL_DIV_ZERO          -10
+#define FAIL_INVALID_ARGUMENT       -1
+#define FAIL_INVALID_OPCODE         -2
+#define FAIL_STACK_OVERFLOW         -3
+#define FAIL_STACK_UNDERFLOW        -4
+#define FAIL_INVALID_MEMORY_ADDRESS -9
+#define FAIL_DIV_ZERO               -10
+#define FAIL_TIMER_OVERFLOW         -11
+#define FAIL_TERMINATE              -128
 
 // SYSTEM CALLS
 typedef enum {
@@ -233,6 +234,7 @@ typedef enum {
     SYS_ANALOG_SEND,    // ( i u16 -- )
     SYS_ANALOG_RECV,    // ( i -- u16 )
     SYS_CAN_SEND,       // ( i u16 n -- )
+    SYS_TERMINATE       // ( -- )
 } syscall_t;
 
 // LED interface set_led / clr_led
@@ -269,6 +271,7 @@ extern int chine_final(chine_t* mp);
 extern int chine_run(chine_t* mp);
 
 extern void chine_set_ip(chine_t* mp, int offset);
+extern int  chine_is_top_level(chine_t* mp);
 
 extern timeout_t chine_millis(void);
 extern timeout_t chine_micros(void);

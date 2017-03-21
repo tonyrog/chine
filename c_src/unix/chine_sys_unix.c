@@ -116,6 +116,10 @@ int chine_unix_sys(chine_t* mp,
 #endif
 	return 0;
     }
+    case SYS_TERMINATE: {
+	*npop = 0;
+	return FAIL_TERMINATE;
+    }
     case SYS_PARAM_FETCH: {
 	TRACEF("param@(%04x,%d)",revarg[1], revarg[0]);
 	*npop = 2;
