@@ -9,14 +9,9 @@
 
 #if defined(ARDUINO)
   #include "Arduino.h"
-  #define DISPATCH_WITH_SWITCH
   #define CHINE_INLINE
 #else
   #define CHINE_INLINE inline
-#endif
-
-#if !defined(DISPATCH_WITH_SWITCH) && !defined(DISPATCH_WITH_JUMPTABLE)
-#define DISPATCH_WITH_SWITCH
 #endif
 
 #include "../include/chine.h"
@@ -238,91 +233,10 @@ static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
     }
 }
 
-#if defined(DISPATCH_WITH_JUMPTABLE)
-
-#define SWITCH_DATA() \
-    void*     N;							\
-    static void* opA[] = {						\
-    [JMPZ]   = &&op_JMPZ,   [JMPNZ]  = &&op_JMPNZ,			\
-    [JNEXT] = &&op_JNEXT, [JMPLZ] = &&op_JMPLZ,				\
-    [JMP]    = &&op_JMP, [CALL]   = &&op_CALL,				\
-    [LITERAL] = &&op_LITERAL, [ARRAY] = &&op_ARRAY };			\
-    static void* op[] = { [DUP]   = &&op_DUP, [ROT]   = &&op_ROT,	\
-			  [OVER]  = &&op_OVER, [DROP]  = &&op_DROP,	\
-			  [SWAP]  = &&op_SWAP, [SUB]   = &&op_SUB,	\
-			  [ADD]   = &&op_ADD,  [MUL]   = &&op_MUL,	\
-			  [NOP]   = &&op_NOP,  [AND]   = &&op_AND,	\
-			  [OR]    = &&op_OR,   [XOR]   = &&op_XOR,	\
-			  [ZEQ]   = &&op_ZEQ,  [ZLT]   = &&op_ZLT,	\
-			  [NOT]   = &&op_NOT,				\
-			  [INV]   = &&op_INV,  [NEG]   = &&op_NEG,	\
-			  [DIV]   = &&op_DIV,  [SHFT]  = &&op_SHFT,	\
-                          [STORE] = &&op_STORE,[FETCH] = &&op_FETCH,	\
-                          [TOR]   = &&op_TOR,  [FROMR] = &&op_FROMR,	\
-                          [RFETCH] = &&op_RFETCH,			\
-			  [SYS]   = &&op_SYS, [EXIT]  = &&op_EXIT,	\
-			  [YIELD] = &&op_YIELD,				\
-                          [ELEM] = &&op_ELEM, [EXEC] = &&op_EXEC,	\
-			  [(EXEC+1) ... 31] = &&op_FAIL }
-
-#define SWITCH() do {				\
-	N = &&next;				\
-    next:					\
-	if (cRP < mp->stack) fail(FAIL_STACK_UNDERFLOW);		\
-	if (cSP > mp->stack+MAX_STACK) fail(FAIL_STACK_UNDERFLOW);	\
-	if (cRP >= cSP) fail(FAIL_STACK_OVERFLOW);			\
-	TRACEF("%04u: ", (int)(cIP - mp->prog));	\
-	I = *cIP++;					\
-	switch(I >> 6) {				\
-	case 0: goto *op[I&31];				\
-        case 1: goto *opA[I&7];				\
-	case 2: goto *opA[I&7];				\
-	case 3:						\
-	    N = &&next1;				\
-	    goto *op[I&7];				\
-	}						\
-    next1:						\
-	N = &&next;					\
-	goto *op[(I>>3) & 7];				\
-    } while(0)
-
-#define CASE(mnem) op_##mnem
-#define JCASE(mnem) op_##mnem
-#define ENDCASE() op_FAIL: { fail(FAIL_INVALID_OPCODE); }
-#define NEXT        goto *N
-#define NEXT0       goto *N
-
-#elif defined(DISPATCH_WITH_SWITCH)
-
-#define SWITCH_DATA()				\
-    int J = 0
-
-#define SWITCH()							\
-    next:								\
-    TRACEF("%04u: ", (int)(cIP - mp->prog));				\
-    if (cRP < mp->stack) fail(FAIL_STACK_UNDERFLOW);			\
-    if (cSP > mp->stack+MAX_STACK) fail(FAIL_STACK_UNDERFLOW);		\
-    if (cRP >= cSP) fail(FAIL_STACK_OVERFLOW);				\
-    I = *cIP++;								\
-    switch(I>>6) {							\
-    case 0: J=I&31; break;						\
-    case 1: J=(I&7)+32; break;						\
-    case 2: J=(I&7)+32; break;						\
-    case 3: J=I&7; break;						\
-    }									\
-next1:									\
-switch(J) {								\
-   default: fail(FAIL_INVALID_OPCODE)
-
-
-#define ENDCASE() }
 #define CASE(mnem) case mnem
 #define JCASE(mnem) case mnem+32
 #define NEXT        goto next
 #define NEXT0       if ((I >> 6)==3) { J=(I>>3)&7; I=0; goto next1; } goto next
-#else 
-#error "define DISPATCH_WITH_JUMPTABLE or DISPATCH_WITH_SWITCH"
-#endif
 
 
 int chine_run(chine_t* mp)
@@ -332,332 +246,345 @@ int chine_run(chine_t* mp)
     cell_t*  cRP;  // return stack
     uint8_t   I;   // instruction
     cell_t    A;   // argument
-    SWITCH_DATA();
+    int J   = 0;   // opcode
 
 #define fail(e) do { mp->cErr=(e); goto L_fail; } while(0)
 
     SWAP_IN(mp);
 
-    SWITCH();
-
-JCASE(JMPZ): {
-	BEGIN(JMPZ,"jmpz",1,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	if (*cSP++ == 0) cIP += A;
-	END(JMPZ,"jmpz",1,0);
+next:
+    TRACEF("%04u: ", (int)(cIP - mp->prog));
+    if (cRP < mp->stack) fail(FAIL_STACK_UNDERFLOW);
+    if (cSP > mp->stack+MAX_STACK) fail(FAIL_STACK_UNDERFLOW);
+    if (cRP >= cSP) fail(FAIL_STACK_OVERFLOW);
+    I = *cIP++;             // load instruction I
+    switch(I>>6) {          // extract opcode J
+    case 0: J=I&31; break;
+    case 1: J=(I&7)+32; break;
+    case 2: J=(I&7)+32; break;
+    case 3: J=I&7; break;
     }
-
-JCASE(JMPNZ): {
-	BEGIN(JMPNZ,"jmpnz",1,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	if (*cSP++ != 0) cIP += A;
-	END(JMPNZ,"jmpnz",1,0);
-    }
-
-JCASE(JNEXT): {
-	BEGIN(JNEXT,"next",0,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	if (--(cRP[-1])>0) cIP += A; else cRP--;
-	END(JNEXT,"next",0,0);
-    }
-
-JCASE(JMPLZ): {
-	BEGIN(JMPLZ,"jmplz",1,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	if (*cSP++ < 0) cIP += A;
-	END(JMPLZ,"jmplz",1,0);
-    }
-
-JCASE(JMP): {
-	BEGIN(JMP,"jmp",0,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	cIP += A;
-	END(JMP,"jmp",0,0);
-    }
-
-JCASE(CALL): {
-	BEGIN(CALL,"call",0,0);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	*cRP++ = (cIP - mp->prog);
-	cIP += A;
-	END(CALL,"call",0,0);
-    }
-
-JCASE(LITERAL): {
-	BEGIN(LITERAL,"literal",0,1);
-	int j;
-	if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	*--cSP = A;
-	END(LITERAL,"literal",0,1);
-    }
-
-JCASE(ARRAY): {
-	// push array pointer on stack and skip
-	BEGIN(ARRAY,"array",0,1);
-	int j;
-	*--cSP = ((cIP-1) - mp->prog);
-	if ((j = get_array_len(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
-	cIP += j;
-	cIP += (get_element_len(I)*A);
-	END(ARRAY,"array",0,1);
-    }
-
-CASE(DUP): {
-	BEGIN(DUP,"dup",1,2);
-	cSP--;
-	cSP[0] = cSP[1];
-	END0(DUP,"dup",1,2);
-    }
-
-CASE(ROT): {
-	BEGIN(ROT,"rot",3,3);
-	cell_t r = cSP[2];
-	cSP[2] = cSP[1];
-	cSP[1] = cSP[0];
-	cSP[0] = r;
-	END0(ROT,"rot",3,3);
-    }
-
-CASE(SWAP): {
-	BEGIN(SWAP,"swap",2,2);
-	cell_t r = cSP[1]; 
-	cSP[1] = cSP[0]; 
-	cSP[0] = r; 
-	END0(SWAP,"swap",2,2);	
-    }
-
-CASE(OVER): {
-	BEGIN(OVER,"over",2,3);
-	cSP--;
-	cSP[0] = cSP[2];
-	END0(OVER,"over",2,3);
-    }
-
-CASE(SUB): {
-	BEGIN(SUB,"-",2,1);
-	cSP[1] -= cSP[0]; 
-	cSP++;
-	END0(OVER,"-",2,1);
-    }
+next1:
+    
+    switch(J) {
+    default: fail(FAIL_INVALID_OPCODE);
+    JCASE(JMPZ): {
+	    BEGIN(JMPZ,"jmpz",1,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    if (*cSP++ == 0) cIP += A;
+	    END(JMPZ,"jmpz",1,0);
+	}
 	
-CASE(DROP): {
-	BEGIN(DROP,"drop",1,0);
-	cSP++;
-	END0(DROP,"drop",1,0);
-    }
+    JCASE(JMPNZ): {
+	    BEGIN(JMPNZ,"jmpnz",1,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    if (*cSP++ != 0) cIP += A;
+	    END(JMPNZ,"jmpnz",1,0);
+	}
 
-CASE(ADD): {
-	BEGIN(ADD,"+",2,1);
-	cSP[1] += cSP[0];
-	cSP++;
-	END0(ADD,"+",2,1);
-    }
+    JCASE(JNEXT): {
+	    BEGIN(JNEXT,"next",0,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    if (--(cRP[-1])>0) cIP += A; else cRP--;
+	    END(JNEXT,"next",0,0);
+	}
 
-CASE(MUL): {
-	BEGIN(MUL,"*",2,1);
-	cSP[1] *= cSP[0];
-	cSP++;
-	END0(MUL,"*",2,1);
-    }
+    JCASE(JMPLZ): {
+	    BEGIN(JMPLZ,"jmplz",1,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    if (*cSP++ < 0) cIP += A;
+	    END(JMPLZ,"jmplz",1,0);
+	}
 
-CASE(NEG): {
-	BEGIN(NEG,"negate",1,1);
-	cSP[0] = -cSP[0];
-	END(NEG,"negate",1,1);
-    }
+    JCASE(JMP): {
+	    BEGIN(JMP,"jmp",0,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    cIP += A;
+	    END(JMP,"jmp",0,0);
+	}
 
-CASE(AND): {
-	BEGIN(AND,"and",2,1);
-	cSP[1] &= cSP[0];
-	cSP++;
-	END(AND,"and",2,1);
-    }
+    JCASE(CALL): {
+	    BEGIN(CALL,"call",0,0);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    *cRP++ = (cIP - mp->prog);
+	    cIP += A;
+	    END(CALL,"call",0,0);
+	}
 
-CASE(OR): {
-	BEGIN(OR,"or",2,1);
-	cSP[1] |= cSP[0];
-	cSP++;
-	END(OR,"or",2,1);
-    }
+    JCASE(LITERAL): {
+	    BEGIN(LITERAL,"literal",0,1);
+	    int j;
+	    if ((j = get_arg(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    *--cSP = A;
+	    END(LITERAL,"literal",0,1);
+	}
 
-CASE(ZEQ): {
-	BEGIN(ZEQ,"0=",1,1);
-	cSP[0] = (cSP[0] == 0);
-	END(ZEQ,"0=",1,1);
-    }
+    JCASE(ARRAY): {
+	    // push array pointer on stack and skip
+	    BEGIN(ARRAY,"array",0,1);
+	    int j;
+	    *--cSP = ((cIP-1) - mp->prog);
+	    if ((j = get_array_len(I,cIP,&A)) < 0) fail(FAIL_INVALID_OPCODE);
+	    cIP += j;
+	    cIP += (get_element_len(I)*A);
+	    END(ARRAY,"array",0,1);
+	}
 
-CASE(ZLT): {
-	BEGIN(ZLT,"0<",1,1);
-	cSP[0] = (cSP[0] < 0);
-	END(ZLT,"0<",1,1);
-    }
+    CASE(DUP): {
+	    BEGIN(DUP,"dup",1,2);
+	    cSP--;
+	    cSP[0] = cSP[1];
+	    END0(DUP,"dup",1,2);
+	}
 
-CASE(NOT): {
-	BEGIN(NOT,"not",1,1);
-	cSP[0] = !cSP[0];
-	END(NOT,"not",1,1);
-    }
+    CASE(ROT): {
+	    BEGIN(ROT,"rot",3,3);
+	    cell_t r = cSP[2];
+	    cSP[2] = cSP[1];
+	    cSP[1] = cSP[0];
+	    cSP[0] = r;
+	    END0(ROT,"rot",3,3);
+	}
 
-CASE(NOP): {
-	BEGIN(NOP,"nop",0,0);
-	END(NOP,"nop",0,0);
-    }
+    CASE(SWAP): {
+	    BEGIN(SWAP,"swap",2,2);
+	    cell_t r = cSP[1]; 
+	    cSP[1] = cSP[0]; 
+	    cSP[0] = r; 
+	    END0(SWAP,"swap",2,2);	
+	}
 
-CASE(XOR): {
-	BEGIN(XOR,"xor",2,1);
-	cSP[1] ^= cSP[0];
-	cSP++;
-	END(XOR,"xor",2,1);
-    }
+    CASE(OVER): {
+	    BEGIN(OVER,"over",2,3);
+	    cSP--;
+	    cSP[0] = cSP[2];
+	    END0(OVER,"over",2,3);
+	}
+	
+    CASE(SUB): {
+	    BEGIN(SUB,"-",2,1);
+	    cSP[1] -= cSP[0]; 
+	    cSP++;
+	    END0(OVER,"-",2,1);
+	}
+	
+    CASE(DROP): {
+	    BEGIN(DROP,"drop",1,0);
+	    cSP++;
+	    END0(DROP,"drop",1,0);
+	}
 
-CASE(DIV): {
-	BEGIN(DIV,"/",2,1);
-	if (cSP[0] == 0) { cSP += 2; fail(FAIL_DIV_ZERO); }
-	cSP[1] /= cSP[0];
-	cSP++;
-	END(DIV,"/",2,1);
-    }
+    CASE(ADD): {
+	    BEGIN(ADD,"+",2,1);
+	    cSP[1] += cSP[0];
+	    cSP++;
+	    END0(ADD,"+",2,1);
+	}
 
-CASE(INV): {
-	BEGIN(INV,"invert",1,1);
-	cSP[0] = ~cSP[0];
-	END(INV,"invert",1,1);
-    }
+    CASE(MUL): {
+	    BEGIN(MUL,"*",2,1);
+	    cSP[1] *= cSP[0];
+	    cSP++;
+	    END0(MUL,"*",2,1);
+	}
+	
+    CASE(NEG): {
+	    BEGIN(NEG,"negate",1,1);
+	    cSP[0] = -cSP[0];
+	    END(NEG,"negate",1,1);
+	}
+	
+    CASE(AND): {
+	    BEGIN(AND,"and",2,1);
+	    cSP[1] &= cSP[0];
+	    cSP++;
+	    END(AND,"and",2,1);
+	}
+	
+    CASE(OR): {
+	    BEGIN(OR,"or",2,1);
+	    cSP[1] |= cSP[0];
+	    cSP++;
+	    END(OR,"or",2,1);
+	}
+	
+    CASE(ZEQ): {
+	    BEGIN(ZEQ,"0=",1,1);
+	    cSP[0] = (cSP[0] == 0);
+	    END(ZEQ,"0=",1,1);
+	}
+	
+    CASE(ZLT): {
+	    BEGIN(ZLT,"0<",1,1);
+	    cSP[0] = (cSP[0] < 0);
+	    END(ZLT,"0<",1,1);
+	}
+	
+    CASE(NOT): {
+	    BEGIN(NOT,"not",1,1);
+	    cSP[0] = !cSP[0];
+	    END(NOT,"not",1,1);
+	}
+	
+    CASE(NOP): {
+	    BEGIN(NOP,"nop",0,0);
+	    END(NOP,"nop",0,0);
+	}
+	
+    CASE(XOR): {
+	    BEGIN(XOR,"xor",2,1);
+	    cSP[1] ^= cSP[0];
+	    cSP++;
+	    END(XOR,"xor",2,1);
+	}
+	
+    CASE(DIV): {
+	    BEGIN(DIV,"/",2,1);
+	    if (cSP[0] == 0) { cSP += 2; fail(FAIL_DIV_ZERO); }
+	    cSP[1] /= cSP[0];
+	    cSP++;
+	    END(DIV,"/",2,1);
+	}
 
-CASE(SHFT): { // shift left (or right)
-	BEGIN(SHFT,"shift",2,1);
-	if (cSP[0] >= 0)
-	    cSP[1] = ((ucell_t)cSP[1]) << cSP[0];
-	else
-	    cSP[1] = ((ucell_t)cSP[1]) >> -cSP[0];
-	cSP++;
-	END(SHFT,"shift",2,1);
-    }
+    CASE(INV): {
+	    BEGIN(INV,"invert",1,1);
+	    cSP[0] = ~cSP[0];
+	    END(INV,"invert",1,1);
+	}
 
-CASE(STORE): {
-	BEGIN(STORE,"!",2,0);
-	cell_t i = cSP[0];
-	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
-	mp->mem[i] = cSP[1];
-	cSP += 2;
-	END(STORE,"!",2,0);
-    }
+    CASE(SHFT): { // shift left (or right)
+	    BEGIN(SHFT,"shift",2,1);
+	    if (cSP[0] >= 0)
+		cSP[1] = ((ucell_t)cSP[1]) << cSP[0];
+	    else
+		cSP[1] = ((ucell_t)cSP[1]) >> -cSP[0];
+	    cSP++;
+	    END(SHFT,"shift",2,1);
+	}
 
-CASE(FETCH): {
-	BEGIN(FETCH,"@",1,1);
-	cell_t i = cSP[0];
-	if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
-	cSP[0] = mp->mem[i]; 
-	END(FETCH,"@",1,1);
-    }
+    CASE(STORE): {
+	    BEGIN(STORE,"!",2,0);
+	    cell_t i = cSP[0];
+	    if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
+	    mp->mem[i] = cSP[1];
+	    cSP += 2;
+	    END(STORE,"!",2,0);
+	}
 
-CASE(TOR): {
-	BEGIN(TOR,">r",1,0);
-	*cRP++ = *cSP++;
-	END(TOR,">r",1,0);
-    }
+    CASE(FETCH): {
+	    BEGIN(FETCH,"@",1,1);
+	    cell_t i = cSP[0];
+	    if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
+	    cSP[0] = mp->mem[i]; 
+	    END(FETCH,"@",1,1);
+	}
 
-CASE(FROMR): {
-	BEGIN(FROMR,"r>",0,1);
-	*--cSP = *--cRP;
-	END(FROMR,"r>",0,1);
-    }
+    CASE(TOR): {
+	    BEGIN(TOR,">r",1,0);
+	    *cRP++ = *cSP++;
+	    END(TOR,">r",1,0);
+	}
+	
+    CASE(FROMR): {
+	    BEGIN(FROMR,"r>",0,1);
+	    *--cSP = *--cRP;
+	    END(FROMR,"r>",0,1);
+	}
 
-CASE(RFETCH): {
-	BEGIN(RFETCH,"r@",0,1);
-	*--cSP = cRP[-1];
-	END(RFETCH,"r@",0,1);
-    }
+    CASE(RFETCH): {
+	    BEGIN(RFETCH,"r@",0,1);
+	    *--cSP = cRP[-1];
+	    END(RFETCH,"r@",0,1);
+	}
 
-CASE(EXIT): {
-	BEGIN(EXIT,"exit",0,0);
-	if (cRP == mp->stack) {
+    CASE(EXIT): {
+	    BEGIN(EXIT,"exit",0,0);
+	    if (cRP == mp->stack) {
+		SWAP_OUT(mp);
+		TEND(EXIT,"exit",0,0);
+		return 0;
+	    }
+	    cIP = mp->prog + *--cRP;
+	    END(EXIT,"exit",0,0);
+	}
+
+    CASE(YIELD): {
+	    BEGIN(YIELD,"yield",0,0);
 	    SWAP_OUT(mp);
-	    TEND(EXIT,"exit",0,0);
+	    XEND(YIELD,"yield",0,0);
 	    return 0;
 	}
-	cIP = mp->prog + *--cRP;
-	END(EXIT,"exit",0,0);
-    }
-
-CASE(YIELD): {
-	BEGIN(YIELD,"yield",0,0);
-	SWAP_OUT(mp);
-	XEND(YIELD,"yield",0,0);
-	return 0;
-    }
-
-CASE(SYS): {
-	BEGIN(SYS,"sys",0,0);
-	cell_t sysop = UINT8(cIP);
-	cell_t ret;
-	cell_t npop;
-	cell_t value;
-
-	cIP++;
-	if ((ret = (*mp->sys)(mp, sysop, cSP, &npop, &value)) < 0) {
-	    TEND(SYS,"sys",0,0);
-	    fail(ret);
+	
+    CASE(SYS): {
+	    BEGIN(SYS,"sys",0,0);
+	    cell_t sysop = UINT8(cIP);
+	    cell_t ret;
+	    cell_t npop;
+	    cell_t value;
+	    
+	    cIP++;
+	    if ((ret = (*mp->sys)(mp, sysop, cSP, &npop, &value)) < 0) {
+		TEND(SYS,"sys",0,0);
+		fail(ret);
+	    }
+	    cSP += npop; // pop arguments
+	    if (ret > 0) {
+		*--cSP = value;
+	    }
+	    END(SYS,"sys",0,0);
 	}
-	cSP += npop; // pop arguments
-	if (ret > 0) {
-	    *--cSP = value;
+
+    CASE(ELEM): {
+	    BEGIN(ELEM,"[]",2,1);
+	    uint8_t* aptr;
+	    int i, j, n;
+	    // check that top of element is a array pointer, 
+	    // and that index on second element is an index into
+	    // that  array, push the element onto stack
+	    i    = cSP[0];             // get index
+	    aptr = mp->prog + cSP[1];  // get array address
+	    
+	    if (((*aptr & 7) != ARRAY) ||
+		((j = get_array_len(*aptr, aptr+1, &A)) < 0))
+		fail(FAIL_INVALID_ARGUMENT);
+	    if ((i < 0) || (i > A))
+		fail(FAIL_INVALID_ARGUMENT);
+	    n = get_element_len(*aptr);
+	    aptr += (j+1);
+	    
+	    switch(n) {
+	    case 1: cSP[1] = INT8(aptr + i*n); break;
+	    case 2: cSP[1] = INT16(aptr + i*n); break;
+	    case 4: cSP[1] = INT32(aptr + i*n); break;
+	    default: fail(FAIL_INVALID_ARGUMENT);
+	    }
+	    cSP++;
+	    END(ELEM,"[]",2,1);
 	}
-	END(SYS,"sys",0,0);
-    }
-
-CASE(ELEM): {
-	BEGIN(ELEM,"[]",2,1);
-	uint8_t* aptr;
-	int i, j, n;
-	// check that top of element is a array pointer, 
-	// and that index on second element is an index into
-	// that  array, push the element onto stack
-	i    = cSP[0];             // get index
-	aptr = mp->prog + cSP[1];  // get array address
-
-	if (((*aptr & 7) != ARRAY) ||
-	    ((j = get_array_len(*aptr, aptr+1, &A)) < 0))
-	    fail(FAIL_INVALID_ARGUMENT);
-	if ((i < 0) || (i > A))
-	    fail(FAIL_INVALID_ARGUMENT);
-	n = get_element_len(*aptr);
-	aptr += (j+1);
-
-	switch(n) {
-	case 1: cSP[1] = INT8(aptr + i*n); break;
-	case 2: cSP[1] = INT16(aptr + i*n); break;
-	case 4: cSP[1] = INT32(aptr + i*n); break;
-	default: fail(FAIL_INVALID_ARGUMENT);
+	
+    CASE(EXEC): {
+	    BEGIN(EXEC,"execute",1,0);
+	    // place a call to the location given by addr on top of stack
+	    // the address is a location relative to program start
+	    *cRP++ = (cIP - mp->prog);  // save return address
+	    cIP = mp->prog + *cSP++;
+	    END(EXEC,"execute",1,0);
 	}
-	cSP++;
-	END(ELEM,"[]",2,1);
     }
-
-CASE(EXEC): {
-	BEGIN(EXEC,"execute",1,0);
-	// place a call to the location given by addr on top of stack
-	// the address is a location relative to program start
-	*cRP++ = (cIP - mp->prog);  // save return address
-	cIP = mp->prog + *cSP++;
-	END(EXEC,"execute",1,0);
-    }
-
-ENDCASE();
-
+    
 L_fail:
     SWAP_OUT(mp);
     return -1;

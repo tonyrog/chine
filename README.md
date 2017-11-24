@@ -169,7 +169,7 @@ of architectures.
 # Source format
 
 The source format for chine code is currently in form of
-the Erlang term format. A program constist of terms of
+the Erlang term format. A program consists of terms of
 lists or straight terms terminated with dots.
 
 Constants are written like
@@ -210,7 +210,7 @@ Or comments may be given in the source file with Erlangs % comments.
 There are a number of helpful constructs for structured programming
 constructs such as loops and if statemensts
 
-## Loops
+## Control
 
     {'if', Then}
     {'if', Then, Else} 
@@ -291,7 +291,7 @@ Each entry in the symbol sections, looks like
 
     Len:8, Sym:Len/binary, N:8, Value:N/binary
 
-The code follows the SYMB section in a setion called CODE
+The code follows the SYMB section in a section called CODE
 
 	'C','O','D','E',
 	Length:32

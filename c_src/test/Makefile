@@ -2,9 +2,9 @@
 # Build test program
 #
 
-CFLAGS = -O3 -Wall -DDISPATCH_WITH_SWITCH
-#CFLAGS = -DTRACE -Wall -DDISPATCH_WITH_SWITCH
-#CFLAGS = -g -DTRACE -Wall -DDISPATCH_WITH_SWITCH
+CFLAGS = -O3 -Wall
+#CFLAGS = -DTRACE -Wall
+#CFLAGS = -g -DTRACE -Wall
 BIN = ../../bin
 
 all:	$(BIN)/chine_exec $(BIN)/chine_trace chine_test chine_test3 chine_bench
