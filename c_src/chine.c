@@ -120,24 +120,126 @@ int chine_nextv(chine_t** mpv, size_t n, timeout_t* tmop, uint8_t* imask)
 #include <stdio.h>
 #include <unistd.h>
 
-void static trace_begin(int op,char* tok,cell_t* sp,int size)
+typedef struct {
+    char* name;
+    int before;
+    int after;
+} instr_info_t;
+
+static const instr_info_t jop_name[] = { // opcode1 and opcode2
+    { "jmpz", 1, 0 },
+    { "jmpnz", 1, 0 },
+    { "next", 0, 0},
+    { "jmplz", 1, 0 },
+    { "jmp", 0, 0 },
+    { "call", 0, 0 },
+    { "literal", 0, 1},
+    { "array", 0, 1 },
+    { "arg", 0, 1 },  // opcode1
+};
+
+static const instr_info_t op_name[] = {
+    // opcode0, opcode3
+    { "dup", 1, 2},
+    { "rot", 3, 3},
+    { "over", 2, 3},
+    { "drop", 1, 0 },
+    { "swap", 2, 2 },
+    { "-", 2, 1 },
+    { "+", 2, 1 },
+    { "*", 2, 1 },
+    // opcode0
+    { "nop", 0, 0 },
+    { "and", 2, 1 },
+    { "or", 2, 1 },
+    { "xor", 2, 1 },
+    { "0=", 1, 1 },
+    { "0<", 1, 1, },
+    { "not", 1, 1 },
+    { "???", 0, 0 },
+    { "negate", 1, 1 },
+    { "/", 2, 1 },
+    { "shift", 2, 1},
+    { "!", 2, 0 },
+    { "@", 1, 1 },
+    { ">r", 1, 0 },
+    { "r>", 0, 1 },
+    { "r@", 0, 1 },
+    { "exit", 0, 0 },
+    { "sys", 0, 0 },
+    {"yield", 0, 0 },
+    { "[]", 2, 1 },
+    { "execute", 1, 0 },
+    { "fp@", 0, 1 },
+    { "fp!", 1, 0 },
+    { "sp@", 0, 1 },
+    { "sp!", 1, 0 },
+};
+
+void static trace_begin(int op,cell_t* sp)
 {
     int i;
-    printf("%s (", tok);
+    int size = 0;
+
+    switch(op >> OPSHFT) {
+    case 0:
+	printf("%s ", op_name[op & OP0MASK].name);
+	size = op_name[op & OP0MASK].before;
+	break;
+    case 1:
+	printf("%s ", jop_name[op & OP1MASK].name);
+	size = jop_name[op & OP1MASK].before;
+	break;
+    case 2:
+	printf("%s ", jop_name[op & OP2MASK].name);
+	size = jop_name[op & OP2MASK].before;
+	break;
+    case 3:
+	printf("%s ", op_name[op & OP3MASK].name);
+	size = op_name[op & OP3MASK].before;
+	break;
+    }
+    printf("%d (", size);
     for (i = size-1; i >= 0; i--)
 	printf(" %d", sp[i]);
     printf(" -- ");
-    if (op == YIELD)
+    if (((op >> OPSHFT) == 0) && ((op & OP0MASK) == YIELD))
 	printf(")\n");
 }
 
-void static trace_end(int op, cell_t* sp, cell_t* sp0, int size, int size0)
+void static trace_end(int op, cell_t* sp, cell_t* sp0)
 {
     int i;
+    int size = 0;
+    int size0 = 0;
+
+    switch(op >> OPSHFT) {
+    case 0:
+	printf("%s ", op_name[op & OP0MASK].name);
+	size = op_name[op & OP0MASK].after;
+	size0 = op_name[op & OP0MASK].before;
+	break;
+    case 1:
+	printf("%s ", jop_name[op & OP1MASK].name);
+	size = jop_name[op & OP1MASK].after;
+	size0 = jop_name[op & OP1MASK].before;	
+	break;
+    case 2:
+	printf("%s ", jop_name[op & OP2MASK].name);
+	size = jop_name[op & OP2MASK].after;
+	size0 = jop_name[op & OP2MASK].before;
+	break;
+    case 3:
+	printf("%s ", op_name[op & OP3MASK].name);
+	size = op_name[op & OP3MASK].after;
+	size0 = op_name[op & OP3MASK].before;
+	break;
+    }
+
     for (i = size-1; i >= 0; i--) 
 	printf("%d ", sp[i]);
     printf(")\n");
-    if (op != SYS) {
+    if (((op >> OPSHFT) != 0) || ((op & OP0MASK) != SYS)) {
 	if ((sp0 - sp) != (size - size0)) {
 	    printf("operation moved stack pointer\n");
 	    exit(1);
@@ -162,21 +264,21 @@ static const char* trace_ins(uint8_t ins)
 
 #define TRACEF(...) printf(__VA_ARGS__)
 
-#define BEGIN(op,tok,b,a) { cell_t* _s_SP=cSP; trace_begin((op),(tok),cSP,(b)); {
-#define XEND(op,tok,b,a) } trace_end((op),cSP,_s_SP,(a),(b)); }
-#define TEND(op,tok,b,a) trace_end((op),cSP,_s_SP,(a),(b));
-#define END(op,tok,b,a) } trace_end((op),cSP,_s_SP,(a),(b)); NEXT; }
-#define END0(op,tok,b,a) } trace_end((op),cSP,_s_SP,(a),(b)); NEXT0; }
+#define BEGIN { cell_t* _s_SP=cSP; trace_begin(I,cSP); {
+#define XEND  } trace_end(I,cSP,_s_SP); }
+#define TEND  trace_end(I,cSP,_s_SP);
+#define END   } trace_end(I,cSP,_s_SP); NEXT; }
+#define END0  } trace_end(I,cSP,_s_SP); NEXT0; }
 
 #else
 
 #define TRACEF(...)
 
-#define BEGIN(op,tok,b,a) 
-#define XEND(op,tok,b,a)
-#define TEND(op,tok,b,a)
-#define END(op,tok,b,a)  NEXT
-#define END0(op,tok,b,a) NEXT0
+#define BEGIN
+#define XEND
+#define TEND
+#define END  NEXT
+#define END0 NEXT0
 
 #endif
 
@@ -229,253 +331,253 @@ next1:
     switch(J) {
     default: fail(FAIL_INVALID_OPCODE);
     JCASE(JMPZ): {
-	    BEGIN(JMPZ,"jmpz",1,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    if (*cSP++ == 0) cIP += A;
-	    END(JMPZ,"jmpz",1,0);
+	    END;
 	}
 	
     JCASE(JMPNZ): {
-	    BEGIN(JMPNZ,"jmpnz",1,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    if (*cSP++ != 0) cIP += A;
-	    END(JMPNZ,"jmpnz",1,0);
+	    END;
 	}
 
     JCASE(JNEXT): {
-	    BEGIN(JNEXT,"next",0,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    if (--(cRP[-1])>0) cIP += A; else cRP--;
-	    END(JNEXT,"next",0,0);
+	    END;
 	}
 
     JCASE(JMPLZ): {
-	    BEGIN(JMPLZ,"jmplz",1,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    if (*cSP++ < 0) cIP += A;
-	    END(JMPLZ,"jmplz",1,0);
+	    END;
 	}
 
     JCASE(JMP): {
-	    BEGIN(JMP,"jmp",0,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    cIP += A;
-	    END(JMP,"jmp",0,0);
+	    END;
 	}
 
     JCASE(CALL): {
-	    BEGIN(CALL,"call",0,0);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    *cRP++ = (cIP - mp->prog);
 	    cIP += A;
-	    END(CALL,"call",0,0);
+	    END;
 	}
 
     JCASE(LITERAL): {
-	    BEGIN(LITERAL,"literal",0,1);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    *--cSP = A;
-	    END(LITERAL,"literal",0,1);
+	    END;
 	}
 
     JCASE(ARRAY): {
 	    // push array pointer on stack and skip
-	    BEGIN(ARRAY,"array",0,1);
+	    BEGIN;
 	    *--cSP = ((cIP-1) - mp->prog);
 	    cIP = cIP + get_array_len(I,cIP,&A);
 	    cIP += (get_element_len(I)*A);
-	    END(ARRAY,"array",0,1);
+	    END;
 	}
 
     JCASE(ARG): {
-	    BEGIN(ARG, "arg", 0, 1);
+	    BEGIN;
 	    cIP = cIP + get_arg(I,cIP,&A);
 	    cSP--;
 	    cSP[0] = cFP[A];
-	    END(ARG, "arg", 0, 1);
+	    END;
 	}
 
     CASE(DUP): {
-	    BEGIN(DUP,"dup",1,2);
+	    BEGIN;
 	    cSP--;
 	    cSP[0] = cSP[1];
-	    END0(DUP,"dup",1,2);
+	    END0;
 	}
 
     CASE(ROT): {
-	    BEGIN(ROT,"rot",3,3);
+	    BEGIN;
 	    cell_t r = cSP[2];
 	    cSP[2] = cSP[1];
 	    cSP[1] = cSP[0];
 	    cSP[0] = r;
-	    END0(ROT,"rot",3,3);
+	    END0;
 	}
 
     CASE(SWAP): {
-	    BEGIN(SWAP,"swap",2,2);
+	    BEGIN;
 	    cell_t r = cSP[1]; 
 	    cSP[1] = cSP[0]; 
 	    cSP[0] = r; 
-	    END0(SWAP,"swap",2,2);	
+	    END0;	
 	}
 
     CASE(OVER): {
-	    BEGIN(OVER,"over",2,3);
+	    BEGIN;
 	    cSP--;
 	    cSP[0] = cSP[2];
-	    END0(OVER,"over",2,3);
+	    END0;
 	}
 	
     CASE(SUB): {
-	    BEGIN(SUB,"-",2,1);
+	    BEGIN;
 	    cSP[1] -= cSP[0]; 
 	    cSP++;
-	    END0(OVER,"-",2,1);
+	    END0;
 	}
 	
     CASE(DROP): {
-	    BEGIN(DROP,"drop",1,0);
+	    BEGIN;
 	    cSP++;
-	    END0(DROP,"drop",1,0);
+	    END0;
 	}
 
     CASE(ADD): {
-	    BEGIN(ADD,"+",2,1);
+	    BEGIN;
 	    cSP[1] += cSP[0];
 	    cSP++;
-	    END0(ADD,"+",2,1);
+	    END0;
 	}
 
     CASE(MUL): {
-	    BEGIN(MUL,"*",2,1);
+	    BEGIN;
 	    cSP[1] *= cSP[0];
 	    cSP++;
-	    END0(MUL,"*",2,1);
+	    END0;
 	}
 	
     CASE(NEGATE): {
-	    BEGIN(NEGATE,"negate",1,1);
+	    BEGIN;
 	    cSP[0] = -cSP[0];
-	    END(NEGATE,"negate",1,1);
+	    END;
 	}
 	
     CASE(AND): {
-	    BEGIN(AND,"and",2,1);
+	    BEGIN;
 	    cSP[1] &= cSP[0];
 	    cSP++;
-	    END(AND,"and",2,1);
+	    END;
 	}
 	
     CASE(OR): {
-	    BEGIN(OR,"or",2,1);
+	    BEGIN;
 	    cSP[1] |= cSP[0];
 	    cSP++;
-	    END(OR,"or",2,1);
+	    END;
 	}
 	
     CASE(ZEQ): {
-	    BEGIN(ZEQ,"0=",1,1);
+	    BEGIN;
 	    cSP[0] = CHINE_TEST(cSP[0] == 0);
-	    END(ZEQ,"0=",1,1);
+	    END;
 	}
 	
     CASE(ZLT): {
-	    BEGIN(ZLT,"0<",1,1);
+	    BEGIN;
 	    cSP[0] = CHINE_TEST(cSP[0] < 0);
-	    END(ZLT,"0<",1,1);
+	    END;
 	}
 	
     CASE(NOT): {
-	    BEGIN(NOT,"not",1,1);
+	    BEGIN;
 	    cSP[0] = ~cSP[0];
-	    END(NOT,"not",1,1);
+	    END;
 	}	
 
     CASE(NOP): {
-	    BEGIN(NOP,"nop",0,0);
-	    END(NOP,"nop",0,0);
+	    BEGIN;
+	    END;
 	}
 	
     CASE(XOR): {
-	    BEGIN(XOR,"xor",2,1);
+	    BEGIN;
 	    cSP[1] ^= cSP[0];
 	    cSP++;
-	    END(XOR,"xor",2,1);
+	    END;
 	}
 	
     CASE(DIV): {
-	    BEGIN(DIV,"/",2,1);
+	    BEGIN;
 	    if (cSP[0] == 0) { cSP += 2; fail(FAIL_DIV_ZERO); }
 	    cSP[1] /= cSP[0];
 	    cSP++;
-	    END(DIV,"/",2,1);
+	    END;
 	}
 
     CASE(SHFT): { // shift left (or right)
-	    BEGIN(SHFT,"shift",2,1);
+	    BEGIN;
 	    if (cSP[0] >= 0)
 		cSP[1] = ((ucell_t)cSP[1]) << cSP[0];
 	    else
 		cSP[1] = ((ucell_t)cSP[1]) >> -cSP[0];
 	    cSP++;
-	    END(SHFT,"shift",2,1);
+	    END;
 	}
 
     CASE(STORE): {
-	    BEGIN(STORE,"!",2,0);
+	    BEGIN;
 	    cell_t i = cSP[0];
 	    if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
 	    mp->mem[i] = cSP[1];
 	    cSP += 2;
-	    END(STORE,"!",2,0);
+	    END;
 	}
 
     CASE(FETCH): {
-	    BEGIN(FETCH,"@",1,1);
+	    BEGIN;
 	    cell_t i = cSP[0];
 	    if ((i < 0) || (i >= MAX_MEM)) fail(FAIL_INVALID_MEMORY_ADDRESS);
 	    cSP[0] = mp->mem[i]; 
-	    END(FETCH,"@",1,1);
+	    END;
 	}
 
     CASE(TOR): {
-	    BEGIN(TOR,">r",1,0);
+	    BEGIN;
 	    *cRP++ = *cSP++;
-	    END(TOR,">r",1,0);
+	    END;
 	}
 	
     CASE(FROMR): {
-	    BEGIN(FROMR,"r>",0,1);
+	    BEGIN;
 	    *--cSP = *--cRP;
-	    END(FROMR,"r>",0,1);
+	    END;
 	}
 
     CASE(RFETCH): {
-	    BEGIN(RFETCH,"r@",0,1);
+	    BEGIN;
 	    *--cSP = cRP[-1];
-	    END(RFETCH,"r@",0,1);
+	    END;
 	}
 
     CASE(EXIT): {
-	    BEGIN(EXIT,"exit",0,0);
+	    BEGIN;
 	    if (cRP == mp->stack) {
 		SWAP_OUT(mp);
-		TEND(EXIT,"exit",0,0);
+		TEND;
 		return 0;
 	    }
 	    cIP = mp->prog + *--cRP;
-	    END(EXIT,"exit",0,0);
+	    END;
 	}
 
     CASE(YIELD): {
-	    BEGIN(YIELD,"yield",0,0);
+	    BEGIN;
 	    SWAP_OUT(mp);
-	    XEND(YIELD,"yield",0,0);
+	    XEND;
 	    return 0;
 	}
 	
     CASE(SYS): {
-	    BEGIN(SYS,"sys",0,0);
+	    BEGIN;
 	    cell_t sysop = UINT8(cIP);
 	    cell_t ret;
 	    cell_t npop;
@@ -483,18 +585,18 @@ next1:
 	    
 	    cIP++;
 	    if ((ret = (*mp->sys)(mp, sysop, cSP, &npop, &value)) < 0) {
-		TEND(SYS,"sys",0,0);
+		TEND;
 		fail(ret);
 	    }
 	    cSP += npop; // pop arguments
 	    if (ret > 0) {
 		*--cSP = value;
 	    }
-	    END(SYS,"sys",0,0);
+	    END;
 	}
 
     CASE(ELEM): {
-	    BEGIN(ELEM,"[]",2,1);
+	    BEGIN;
 	    uint8_t* aptr;
 	    int i, j, n;
 	    // check that top of element is a array pointer, 
@@ -514,41 +616,41 @@ next1:
 	    default: fail(FAIL_INVALID_ARGUMENT);
 	    }
 	    cSP++;
-	    END(ELEM,"[]",2,1);
+	    END;
 	}
 	
     CASE(EXEC): {
-	    BEGIN(EXEC,"execute",1,0);
+	    BEGIN;
 	    // place a call to the location given by addr on top of stack
 	    // the address is a location relative to program start
 	    *cRP++ = (cIP - mp->prog);  // save return address
 	    cIP = mp->prog + *cSP++;
-	    END(EXEC,"execute",1,0);
+	    END;
 	}
 
     CASE(SPFETCH): {
-	    BEGIN(SPFETCH, "sp@", 0, 1);
+	    BEGIN;
 	    cSP--;
 	    cSP[0] = (cSP+1 - mp->stack);
-	    END(SPFETCH, "sp@", 0, 1);
+	    END;
 	}
 
     CASE(SPSTORE): {
-	    BEGIN(SPSTORE, "sp!", 1, 0);
+	    BEGIN;
 	    cSP = (mp->stack + cSP[0]);
-	    END(SPSTORE, "sp!", 1, 0);
+	    END;
 	}		
 
     CASE(FPFETCH): {  // fp@ ( -- fp )
-	    BEGIN(FPFETCH, "fp@", 0, 1);
+	    BEGIN;
 	    *--cSP = (cFP - mp->stack);
-	    END(FPFETCH, "fp@", 0, 1);
+	    END;
 	}
 
     CASE(FPSTORE): {  // fp! ( fp -- )
-	    BEGIN(FPSTORE, "fp!", 1, 0);
+	    BEGIN;
 	    cFP = *cSP++ + mp->stack;
-	    END(FPSTORE, "fp!", 1, 0);
+	    END;
 	}
 
     }

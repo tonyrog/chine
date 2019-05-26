@@ -153,7 +153,7 @@ typedef enum {
 } opcode1_t;
 
 typedef enum {
-    // op3
+    // opcode0 and opcode3
     DUP     = 0,        // dup: ( a -- a a )
     ROT     = 1,        // rot: ( a b c  -- b c a )  ( down )
     OVER    = 2,        // over: ( a b -- b a )
@@ -162,7 +162,7 @@ typedef enum {
     SUB     = 5,        // -: ( a b -- [ a-b ] )
     ADD     = 6,        // +:  ( x1 x2 -- (x1+x2) )
     MUL     = 7,        // *: ( x1 x2 -- (x1*x2) )
-    // op6
+    // opcode0
     NOP     = 8,        // nop: ( -- )
     AND     = 9,        // and: ( a b -- (a&b) )
     OR      = 10,       // or: ( a b -- (a|b) )
