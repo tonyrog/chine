@@ -186,8 +186,8 @@ typedef enum {
     EXEC    = 28,       // execute ( a* i -- )
     FPFETCH = 29,       // fp@ ( -- fp )
     FPSTORE = 30,       // fp! ( fp -- )
-    SPFETCH = 31,       // sp! ( -- sp )
-    SPSTORE = 32,       // sp@ ( sp -- )
+    SPFETCH = 31,       // sp@ ( -- sp )
+    SPSTORE = 32,       // sp! ( sp -- )
     OP_33   = 33,
     //...
     OP_63   = 63

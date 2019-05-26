@@ -7,7 +7,7 @@
 #include <memory.h>
 #endif
 
-#include "../include/chine.h"
+#include "chine.h"
 
 // Initialize machine
 void chine_init(chine_t* mp, uint8_t* prog,

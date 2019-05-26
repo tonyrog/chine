@@ -2,7 +2,7 @@
 # Build test program
 #
 
-CFLAGS = -O3 -Wall
+CFLAGS = -O3 -Wall -I../../include
 #CFLAGS = -DTRACE -Wall
 #CFLAGS = -g -DTRACE -Wall
 BIN = ../../bin
@@ -22,4 +22,4 @@ chine_test3: ../chine.c ../../include/chine.h ../unix/chine_sys_unix.c chine_tes
 	$(CC) $(CFLAGS) -o $@ ../chine.c ../unix/chine_sys_unix.c chine_test3.c
 
 chine_bench: ../chine.c ../../include/chine.h ../unix/chine_sys_unix.c chine_bench.c
-	$(CC) -o $@ ../chine.c ../unix/chine_sys_unix.c chine_bench.c
+	$(CC) $(CFLAGS) -o $@ ../chine.c ../unix/chine_sys_unix.c chine_bench.c
