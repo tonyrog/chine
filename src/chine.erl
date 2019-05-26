@@ -16,6 +16,14 @@
 
 -include("../include/chine.hrl").
 
+-ifdef(OTP_RELEASE). %% this implies 21 or higher
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(GET_STACK(Stacktrace), Stacktrace).
+-else.
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(GET_STACK(_), erlang:get_stacktrace()).
+-endif.
+
 options() ->
     [ {format,$f,"format", {atom,binary}, "output file format"},
       {debug,$d,"debug", undefined, "show debug information"},
@@ -43,7 +51,7 @@ start(Args) ->
 	{ok,{Opts,[File]}} ->
 	    do_input(File, Opts);
 	{error,Error} ->
-	    io:format("~s\n",
+	    io:format(standard_error, "~s\n",
 		      [getopt:format_error(options(),Error)]),
 	    getopt:usage(options(), "chine"),
 	    halt(1)
@@ -57,15 +65,16 @@ do_input(File, Opts) ->
 		AsmResult ->
 		    do_emit(AsmResult, Opts)
 	    catch
-		error:Reason ->
-		    io:format("~s:error: ~p\n~p", 
+		?EXCEPTION(error,Reason,StackTrace) ->
+		    io:format(standard_error, "~s:error: ~p\n~p", 
 			      ["chin_compile", Reason,
-			       erlang:get_stacktrace()
+			       ?GET_STACK(StackTrace)
 			      ]),
 		    halt(1)
 	    end;
 	{error,Reason} ->
-	    io:format("~s:error: ~p\n", 
+	    io:format(standard_error,
+		      "~s:error: ~p\n", 
 		      ["chin_compile", Reason]),
 	    halt(1)
     end.
@@ -116,7 +125,7 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 			    halt(0)
 		    end;
 		{error,Reason} ->
-		    io:format("~s:error: ~p\n", 
+		    io:format(standard_error, "~s:error: ~p\n", 
 			      ["chin", Reason]),
 		    halt(1)
 	    end
@@ -156,7 +165,8 @@ symbol_table(Symbols, Labels) ->
       fun(L, Acc) ->
 	      case maps:find(L, Labels) of
 		  error ->
-		      io:format("warning: exported label ~s not found\n", [L]),
+		      io:format(standard_error,
+				"warning: exported label ~s not found\n", [L]),
 		      Acc;
 		  {ok,[Addr]} ->
 		      [{encode_symbol_name(L), Addr}|Acc]
@@ -190,175 +200,212 @@ asm_list(Code,Opts) ->
 debugf(Opts,Fmt,As) ->
     case lists:member(debug, Opts) of
 	true ->
-	    io:format(Fmt, As);
+	    io:format(standard_error, Fmt, As);
 	false ->
 	    ok
     end.
 
 
-%% on input a jump should look like {jmp,L} when L is a label
+%% on input a jump should look like {jmp,L} where L is a label
 %% first pass transform all jumps into generic form {{jop,jmp},L}
 %% later pass will determin the jump offset size K {{jop,jmp,K},L}
 %% where K=0,1,2,4
 
 jopcodes() ->
     #{
-       ?JENUM(jmpz),
-       ?JENUM(jmpnz),
-       ?JENUM(next),
-       ?JENUM(jmplz),
-       ?JENUM(jmp),
-       ?JENUM(call),
-       ?JENUM(literal),
-       ?JENUM(array)
+      ?JENUM(jmpz),
+      ?JENUM(jmpnz),
+      ?JENUM(next),
+      ?JENUM(jmplz),
+      ?JENUM(jmp),
+      ?JENUM(call),
+      ?JENUM(literal),
+      ?JENUM(array),
+      %% opcode1
+      ?JENUM(arg)
      }.
 
 opcodes() ->
     #{
-       ?ENUM(dup),
-       ?ENUM(rot),
-       ?ENUM(over),
-       ?ENUM(drop),
-       ?ENUM(swap),
-       ?ENUM('-'),
-       ?ENUM('+'),
-       ?ENUM('*'),
-       %% op6
-       ?ENUM('nop'),
-       ?ENUM('and'),
-       ?ENUM('or'),
-       ?ENUM('xor'),
-       ?ENUM('0='),
-       ?ENUM('0<'),
-       ?ENUM('not'),
-       ?ENUM(invert),
-       ?ENUM(negate),
-       ?ENUM('/'),
-       ?ENUM(shift),
-       ?ENUM('!'),
-       ?ENUM('@'),
-       ?ENUM('>r'),
-       ?ENUM('r>'),
-       ?ENUM('r@'),
-       ?ENUM(exit),
-       ?ENUM(sys),
-       ?ENUM(yield),
-       ?ENUM('[]'),
-       ?ENUM('execute')
+      ?ENUM(dup),
+      ?ENUM(rot),
+      ?ENUM(over),
+      ?ENUM(drop),
+      ?ENUM(swap),
+      ?ENUM('-'),
+      ?ENUM('+'),
+      ?ENUM('*'),
+      %% op6
+      ?ENUM('nop'),
+      ?ENUM('and'),
+      ?ENUM('or'),
+      ?ENUM('xor'),
+      ?ENUM('0='),
+      ?ENUM('0<'),
+      ?ENUM('not'),
+      ?ENUM(negate),
+      ?ENUM('/'),
+      ?ENUM(shift),
+      ?ENUM('!'),
+      ?ENUM('@'),
+      ?ENUM('>r'),
+      ?ENUM('r>'),
+      ?ENUM('r@'),
+      ?ENUM(exit),
+      ?ENUM(sys),
+      ?ENUM(yield),
+      ?ENUM('[]'),
+      ?ENUM('execute'),
+      ?ENUM('fp@'),
+      ?ENUM('fp!'),
+      ?ENUM('sp@'),
+      ?ENUM('sp!')
      }.
 
 syscalls() ->
     #{
-       ?SENUM(sys_init),
-       ?SENUM(sys_param_fetch),
-       ?SENUM(sys_param_store),
-       ?SENUM(sys_timer_init),
-       ?SENUM(sys_timer_start),
-       ?SENUM(sys_timer_stop),
-       ?SENUM(sys_timer_timeout),
-       ?SENUM(sys_timer_running),
-       ?SENUM(sys_input_fetch),
-       ?SENUM(sys_output_store),
-       ?SENUM(sys_select_timer),
-       ?SENUM(sys_deselect_timer),
-       ?SENUM(sys_select_input),
-       ?SENUM(sys_deselect_input),
-       ?SENUM(sys_deselect_all),
-       ?SENUM(sys_uart_send),
-       ?SENUM(sys_uart_recv),
-       ?SENUM(sys_uart_avail),
-       ?SENUM(sys_now),
-       ?SENUM(sys_gpio_input),
-       ?SENUM(sys_gpio_output),
-       ?SENUM(sys_gpio_set),
-       ?SENUM(sys_gpio_clr),
-       ?SENUM(sys_analog_send),
-       ?SENUM(sys_analog_recv),
-       ?SENUM(sys_can_send),
-       ?SENUM(sys_terminate)
+      ?SENUM(sys_init),
+      ?SENUM(sys_terminate),
+      ?SENUM(sys_now),
+      ?SENUM(sys_emit),
+      ?SENUM(sys_recv),
+      ?SENUM(sys_avail),
+      ?SENUM(sys_param_fetch),
+      ?SENUM(sys_param_store),
+      ?SENUM(sys_timer_init),
+      ?SENUM(sys_timer_start),
+      ?SENUM(sys_timer_stop),
+      ?SENUM(sys_timer_timeout),
+      ?SENUM(sys_timer_running),
+      ?SENUM(sys_input_fetch),
+      ?SENUM(sys_output_store),
+      ?SENUM(sys_select_timer),
+      ?SENUM(sys_deselect_timer),
+      ?SENUM(sys_select_input),
+      ?SENUM(sys_deselect_input),
+      ?SENUM(sys_deselect_all),
+      ?SENUM(sys_uart_connect),
+      ?SENUM(sys_uart_send),
+      ?SENUM(sys_uart_recv),
+      ?SENUM(sys_uart_avail),
+      ?SENUM(sys_uart_disconnect),
+      ?SENUM(sys_gpio_input),
+      ?SENUM(sys_gpio_output),
+      ?SENUM(sys_gpio_set),
+      ?SENUM(sys_gpio_clr),
+      ?SENUM(sys_analog_send),
+      ?SENUM(sys_analog_recv),
+      ?SENUM(sys_can_connect),
+      ?SENUM(sys_can_send),
+      ?SENUM(sys_can_recv),
+      ?SENUM(sys_can_avail),
+      ?SENUM(sys_can_disconnect),
+      ?SENUM(sys_file_open),
+      ?SENUM(sys_file_write),
+      ?SENUM(sys_file_read),
+      ?SENUM(sys_file_close)
      }.
 
 %% not real opcodes, they are expanded like macros
 %% some may be expanded like calls instead?!
 synthetic_opcodes() ->
     #{
-       '1+'  => [{const,1},'+'],
-       '1-'  => [{const,1},'-'],
-       'lshift' => [shift],
-       'rshift' => [negate,shift],
-       '<'   => ['-', '0<'],
-       '>'   => [swap, '-', '0<'],
-       '<='  => ['-', '0<='],
-       '>='  => [swap,'-', '0<='],
-       '='   => ['-', '0='],
-       '<>'  => ['-', 'not'],
-       'u<'  => ['2dup','xor','0<',
-		 {'if',[swap,drop,'0<'],['-','0<']}],
-       'u<=' => ['2dup','xor','0<',
-		 {'if',[swap,drop,'0<'],['-','0<=']}],
-       'u>'  => [swap, 'u<'],
-       'u>=' => [swap, 'u<='],
-       '0<>' => ['0=', 'not'],
-       '0>'  => [{const,0},'>'],
-       '0<=' => [{const,1},'-','0<'],
-       'abs' => [dup,'0<',{'if',[negate]}],
-       'min' => [over,over,'<',{'if',[drop],[swap,drop]}],
-       'max' => [over,over,'<',{'if',[swap,drop],[drop]}],
-       'nip' => [swap,drop],
-       'tuck' => [swap,over],
-       '-rot' => [rot,rot],
-       '2drop' => [drop,drop],
-       '2dup'  => [over,over],
-       '2*'    => [dup,'+'],
-       'arshift'   => [dup,{const,32},swap,'-',
-		       {const,-1},swap,shift,
-		       '-rot', negate,shift, 'or'],
-       '2/'    => [{const,1},arshift],
-       'sqr'   => [dup,'*'],
-       'mod'   => ['2dup','/','*','-'],
-       'jmp*'      => ['>r', exit],  %% ( caddr -- )
-       ';'         => [exit],
+      '1+'  => [{const,1},'+'],
+      '1-'  => [{const,1},'-'],
+      'lshift' => [shift],
+      'rshift' => [negate,shift],
+      '<'   => ['-', '0<'],
+      '>'   => [swap, '-', '0<'],
+      '<='  => ['-', '0<='],
+      '>='  => [swap,'-', '0<='],
+      '='   => ['-', '0='],
+      '<>'  => ['-', 'not'],
+      'u<'  => ['2dup','xor','0<',
+		{'if',[swap,drop,'0<'],['-','0<']}],
+      'u<=' => ['2dup','xor','0<',
+		{'if',[swap,drop,'0<'],['-','0<=']}],
+      'u>'  => [swap, 'u<'],
+      'u>=' => [swap, 'u<='],
+      '0<>' => ['0=', 'not'],
+      '0>'  => [{const,0},'>'],
+      '0<=' => [{const,1},'-','0<'],
+      'abs' => [dup,'0<',{'if',[negate]}],
+      'min' => [over,over,'<',{'if',[drop],[swap,drop]}],
+      'max' => [over,over,'<',{'if',[swap,drop],[drop]}],
+      'nip' => [swap,drop],
+      'tuck' => [swap,over],
+      '-rot' => [rot,rot],
+      '2drop' => [drop,drop],
+      '2dup'  => [over,over],
+      '2*'    => [dup,'+'],
+      'arshift'   => [dup,{const,32},swap,'-',
+		      {const,-1},swap,shift,
+		      '-rot', negate,shift, 'or'],
+      '2/'    => [{const,1},arshift],
+      'sqr'   => [dup,'*'],
+      'mod'   => ['2dup','/','*','-'],
+      'jmp*'  => ['>r', exit],  %% ( caddr -- )
+      ';'     => [exit],
 
-       %% utils
-       'setbit' => [{const,1},swap,shift,'or'],
-       'clrbit' => [{const,1},swap,shift,invert,'and'],
-       'togglebit' => [{const,1},swap,shift,'xor'],
-       'tstbit'    => [{const,1},swap,shift,'and'],
-       'setclrbit' => [{'if',[setbit],[clrbit]}],
+      'fenter' => ['fp@','>r','sp@','fp!'],
+      'fleave' => ['fp@','r>','fp!','sp!'],
 
-       %% sys interface
-       'param@'    => [{sys,sys_param_fetch}],
-       'param!'    => [{sys,sys_param_store}],
-       'timer_init' => [{sys,sys_timer_init}],
-       'timer_start' => [{sys,sys_timer_start}],
-       'timer_stop' => [{sys,sys_timer_stop}],
-       'timer_timeout' => [{sys,sys_timer_timeout}],
-       'timer_running' => [{sys,sys_timer_running}],
-       'input@'        => [{sys,sys_input_fetch}],
-       'output!'       => [{sys,sys_output_store}],
-       select_timer => [{sys,sys_select_timer}],
-       deselect_timer => [{sys,sys_deselect_timer}],
-       select_input => [{sys,sys_select_input}],
-       deselect_input => [{sys,sys_deselect_input}],
-       deselect_all  => [{sys,sys_deselect_all}],
-       uart_send     => [{sys,sys_uart_send}],
-       uart_recv     => [{sys,sys_uart_recv}],
-       uart_avail    => [{sys,sys_uart_avail}],
-       now           => [{sys,sys_now}],
-       gpio_input    => [{sys,sys_gpio_input}],
-       gpio_output   => [{sys,sys_gpio_output}],
-       gpio_set      => [{sys,sys_gpio_set}],
-       gpio_clr      => [{sys,sys_gpio_clr}],
-       gpio_get      => [{sys,sys_gpio_get}],
-       gpio_mask     => [{sys,sys_gpio_mask}],
-       analog_set    => [{sys,sys_analog_set}],
-       analog_clr    => [{sys,sys_analog_clr}],
-       can_send      => [{sys,sys_can_send}],
-       terminate     => [{sys,sys_terminate}],
-       %% aliases
-       'emit'        => [{sys,sys_uart_send}],
-       'key'         => [{sys,sys_uart_recv}],
-       '?key'        => [{sys,sys_uart_avail}]
+      %% utils
+      'setbit'    => [{const,1},swap,shift,'or'],
+      'clrbit'    => [{const,1},swap,shift,'not','and'],
+      'togglebit' => [{const,1},swap,shift,'xor'],
+      'tstbit'    => [{const,1},swap,shift,'and'],
+      'setclrbit' => [{'if',[setbit],[clrbit]}],
+
+      %% sys interface
+      terminate       => [{sys,sys_terminate}],
+      now             => [{sys,sys_now}],
+      emit            => [{sys,sys_emit}],
+      key             => [{sys,sys_recv}],
+      '?key'          => [{sys,sys_avail}],
+      'param@'        => [{sys,sys_param_fetch}],
+      'param!'        => [{sys,sys_param_store}],
+      %% TIMERS
+      timer_init      => [{sys,sys_timer_init}],
+      timer_start     => [{sys,sys_timer_start}],
+      timer_stop      => [{sys,sys_timer_stop}],
+      timer_timeout   => [{sys,sys_timer_timeout}],
+      timer_running   => [{sys,sys_timer_running}],
+      'input@'        => [{sys,sys_input_fetch}],
+      'output!'       => [{sys,sys_output_store}],
+      select_timer    => [{sys,sys_select_timer}],
+      deselect_timer  => [{sys,sys_deselect_timer}],
+      %% INPUT
+      select_input    => [{sys,sys_select_input}],
+      deselect_input  => [{sys,sys_deselect_input}],
+      deselect_all    => [{sys,sys_deselect_all}],
+      %% UART
+      uart_connect    => [{sys,sys_uart_connect}],
+      uart_send       => [{sys,sys_uart_send}],
+      uart_recv       => [{sys,sys_uart_recv}],
+      uart_avail      => [{sys,sys_uart_avail}],
+      uart_disconnect => [{sys,sys_uart_disconnect}],
+      %% GPIO
+      gpio_input      => [{sys,sys_gpio_input}],
+      gpio_output     => [{sys,sys_gpio_output}],
+      gpio_set        => [{sys,sys_gpio_set}],
+      gpio_clr        => [{sys,sys_gpio_clr}],
+      gpio_get        => [{sys,sys_gpio_get}],
+      gpio_mask       => [{sys,sys_gpio_mask}],
+      %% ANALOG
+      analog_set      => [{sys,sys_analog_set}],
+      analog_clr      => [{sys,sys_analog_clr}],
+      %% CAN
+      can_connect     => [{sys,sys_can_connect}],
+      can_send        => [{sys,sys_can_send}],
+      can_recv        => [{sys,sys_can_recv}],
+      can_avail       => [{sys,sys_can_avail}],
+      can_disconnect  => [{sys,sys_can_disconnect}],
+      %% FILE
+      file_open       => [{sys,sys_file_open}],
+      file_write      => [{sys,sys_file_write}],
+      file_read       => [{sys,sys_file_read}],
+      file_close      => [{sys,sys_file_close}]
      }.
 
 expand_synthetic(Code,_Opts) ->
@@ -395,6 +442,9 @@ expand_synth_([{'for',Loop}|Code],Acc,Sym) ->
 expand_synth_([{enum,Ls}|Code],Acc,Sym) ->
     Sym1 = add_enums_(Ls, 0, Sym),
     expand_synth_(Code,Acc,Sym1);
+expand_synth_([{define,Name,Value}|Code],Acc,Sym) ->
+    Sym1 = maps:put({symbol,Name},Value,Sym),
+    expand_synth_(Code, Acc, Sym1);
 expand_synth_([{comment,_Comment}|Code],Acc,Sym) ->
     %% just a comment ignore it
     expand_synth_(Code,Acc,Sym);
@@ -406,13 +456,23 @@ expand_synth_([{Jop,L}|Code],Acc,Sym) when
     expand_synth_(Code,[{{jop,Jop},L1}|Acc], Sym);
 expand_synth_([Op={const,C}|Code],Acc,Sym) when is_integer(C) ->
     expand_synth_(Code,[Op|Acc],Sym);
-expand_synth_([{const,E}|Code],Acc,Sym) ->
-    case maps:find({enum,E}, Sym) of
+expand_synth_([{const,Name}|Code],Acc,Sym) ->
+    case maps:find({symbol,Name}, Sym) of
 	{ok,C} ->
 	    expand_synth_(Code,[{const,C}|Acc],Sym);
 	error ->
-	    io:format("error: symbol ~p not defined\n", [E]),
-	    expand_synth_(Code,[{const,E} | Acc],Sym)
+	    io:format(standard_error, "error: symbol ~p not defined\n",[Name]),
+	    expand_synth_(Code,[{const,Name} | Acc],Sym)
+    end;
+expand_synth_([Op={arg,I}|Code],Acc,Sym) when is_integer(I) ->
+    expand_synth_(Code,[Op|Acc],Sym);
+expand_synth_([{arg,Name}|Code],Acc,Sym) ->
+    case maps:find({symbol,Name}, Sym) of
+	{ok,I} ->
+	    expand_synth_(Code,[{arg,I}|Acc],Sym);
+	error ->
+	    io:format(standard_error, "error: symbol ~p not defined\n",[Name]),
+	    expand_synth_(Code,[{arg,Name} | Acc],Sym)
     end;
 expand_synth_([{export,L}|Code],Acc,Sym) ->
     L1 = normalize_label(L),
@@ -447,7 +507,7 @@ expand_synth_([],Acc,Sym) ->
     {lists:reverse(Acc),Sym}.
 
 add_enums_([E|Es], I, Sym) ->
-    Sym1 = maps:put({enum,E}, I, Sym),
+    Sym1 = maps:put({symbol,E}, I, Sym),
     add_enums_(Es, I+1, Sym1);
 add_enums_([], _I, Sym) ->
     Sym.
@@ -458,11 +518,11 @@ normalize_label(L) when is_list(L) ->
     try iolist_size(L) of
 	Len when Len < 256 -> L;
 	_ ->
-	    io:format("label name too long ~s\n", [L]),
+	    io:format(standard_error, "label name too long ~s\n", [L]),
 	    erlang:error({label_too_loong, L})
     catch
 	error:_ ->
-	    io:format("label name not string ~p\n", [L]),
+	    io:format(standard_error, "label name not string ~p\n", [L]),
 	    erlang:error({label_not_string, L})
     end.
 
@@ -582,7 +642,6 @@ resolve_8_addr_([Op|Code],Acc,Map,Addr,Res) ->
     resolve_8_addr_(Code, [Op|Acc], Map, add_addr(Len, Addr),Res);
 resolve_8_addr_([], Acc, _Map, _Addr,Res) ->
     {Res,lists:reverse(Acc)}.
-
 
 %%
 %% Locate guaranteed near (16-bit) jumps
@@ -735,19 +794,26 @@ encode_const(Code,_Opts) ->
 encode_const_([{const,C}|Code], Acc) ->
     L = encode_literal(C),
     encode_const_(Code, [L|Acc]);
+encode_const_([{arg,I}|Code], Acc) ->
+    Type = case type_integer(I) of
+	       int3 -> int8;  %% int3 is not available for opcode1
+	       T -> T
+	   end,
+    encode_const_(Code, [{arg,Type,I}|Acc]);
 encode_const_([{caddr,L}|Code], Acc) ->
     %% caddr is an offset from program start, can only 
     %% be calculated when all labels have been calculated
     %% but is now assumed to fit in a 16 bit integer FIXME
     encode_const_(Code, [{caddr,uint16,L}|Acc]);
 encode_const_([{string,S}|Code], Acc) when is_list(S) ->
-    encode_const_([{array,[{const,C} || C <- S]}|Code], Acc);
+    encode_const_([{array,[{const,uint8,C} || C <- S]}|Code], Acc);
 encode_const_([{string,S}|Code], Acc) when is_binary(S) ->
-    encode_const_([{array,[{const,C} || <<C>> <= S]}|Code], Acc);
+    encode_const_([{array,[{const,uint8,C} || <<C>> <= S]}|Code], Acc);
 encode_const_([{array,Es}|Code], Acc) ->
     N = length(Es),
     Es1 = [case E of
 	       {const,C} -> encode_literal(C);
+	       {const,Type,Value} -> {literal,Type,Value};
 	       {caddr,L} -> {caddr,uint16,L} %% FIXME
 	   end || E <- Es],
     K = if N =:= 0 -> 1;
@@ -772,22 +838,25 @@ encode_const_([],Acc) ->
     lists:reverse(Acc).
 
 %% encode some integer constants
-encode_literal(true)    -> encode_literal(1);
-encode_literal(false)   -> encode_literal(0);
+encode_literal(true)    -> encode_literal(?CHINE_TRUE);
+encode_literal(false)   -> encode_literal(?CHINE_FALSE);
 encode_literal(boolean) -> encode_literal(?INPUT_BOOLEAN);
 encode_literal(analog)  -> encode_literal(?INPUT_ANALOG);
 encode_literal(encoder) -> encode_literal(?INPUT_ENCODER);
-encode_literal(I) when is_integer(I) ->
+encode_literal(I) when is_integer(I) -> 
+    {literal,type_integer(I), I}.
+
+type_integer(I) when is_integer(I) ->
     if I >= -4, I =< 3 ->
-	    {literal,int3,I};
+	    int3;
        I >= -16#80, I =< 16#7f ->
-	    {literal,int8,I};
+	    int8;
        I >= -16#8000, I =< 16#7fff ->
-	    {literal,int16,I};
+	    int16;
        I >= -16#80000000, I =< 16#7fffffff ->
-	    {literal,int32,I}
+	    int32
     end.
-    
+
 %% 
 %% Length of basic block in bytes
 %%
@@ -806,11 +875,17 @@ opcode_length({literal,int3,_X}) -> 1;
 opcode_length({literal,int8,_X}) -> 2;
 opcode_length({literal,int16,_X}) -> 3;
 opcode_length({literal,int32,_X}) -> 5;
-opcode_length({literal,uint3,_X}) -> 1;
-opcode_length({literal,uint8,_X}) -> 2;
-opcode_length({literal,uint16,_X}) -> 3;
-opcode_length({literal,uint32,_X}) -> 5;
-opcode_length({caddr,uint3,_L})  -> 1;
+
+%% opcode1 only no int3 encoding
+opcode_length({arg,int8,_X}) -> 2;
+opcode_length({arg,int16,_X}) -> 3;
+opcode_length({arg,int32,_X}) -> 5;
+
+%%opcode_length({literal,uint3,_X}) -> 1;
+%%opcode_length({literal,uint8,_X}) -> 2;
+%%opcode_length({literal,uint16,_X}) -> 3;
+%%opcode_length({literal,uint32,_X}) -> 5;
+%% opcode_length({caddr,uint3,_L})  -> 1;
 opcode_length({caddr,uint8,_L})  -> 2;
 opcode_length({caddr,uint16,_L}) -> 3;
 opcode_length({caddr,uint32,_L}) -> 5;
@@ -836,7 +911,7 @@ opcode_length({Op1,Op2}) ->
 opcode_length(Op) ->
     Map = opcodes(),
     N7 = maps:get(Op, Map),
-    if N7 < 32 -> 1 end.
+    if N7 < 64 -> 1 end.
 
 %%
 %% Encode all opcodes into bytes
@@ -845,31 +920,46 @@ encode_opcodes(Code,_Opts) ->
     encode_opcodes_(Code, [], maps:merge(jopcodes(),opcodes())).
 
 encode_opcodes_([{literal,int3,I}|Code], Acc, Map) ->
-    encode_opcodes_(Code,[?OPCODE2(?JOP(literal),I)|Acc],Map);
-encode_opcodes_([{literal,uint3,I}|Code], Acc, Map) ->
-    encode_opcodes_(Code,[?OPCODE2(?JOP(literal),I)|Acc],Map);
+    OP = ?OPCODE2(?JOP(literal),I),
+    encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([{literal,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
-    encode_opcodes_(Code,cat(Is,[?OPCODE1(?JOP(literal),Kc)|Acc]),Map);
+    OP = ?OPCODE1(?JOP(literal),Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
+
+%% arg must is OPCODE1 only!
+encode_opcodes_([{arg,int3,I}|Code], Acc, Map) ->
+    OP = ?OPCODE1(?JOP(arg),I),
+    encode_opcodes_(Code,[OP|Acc],Map);
+encode_opcodes_([{arg,Kv,I}|Code], Acc, Map) ->
+    K = variant_length(Kv),
+    Kc = variant_code(Kv),
+    Is = encode_integer(I,K),
+    OP = ?OPCODE1(?JOP(arg),Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
+
 encode_opcodes_([{{jop,Jmp,int3},I}|Code], Acc, Map) ->
     N = maps:get(Jmp,Map),
     if N < 8 -> true end,
-    encode_opcodes_(Code,[?OPCODE2(N,I)|Acc],Map);
+    OP = ?OPCODE2(N,I),
+    encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([{{jop,Jmp,Kv},Offset}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     N = maps:get(Jmp,Map),
     true = N < 8,
     Is = encode_integer(Offset,K),
-    encode_opcodes_(Code,cat(Is,[?OPCODE1(N,Kc)|Acc]),Map);
+    OP = ?OPCODE1(N,Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 %% ARRAY
 encode_opcodes_([{array,uint3x8,Es}|Code],Acc,Map) ->
     N = length(Es),
     Is = [encode_integer(X,1) || {literal,_,X} <- Es],
     Ls = lists:append(Is),
-    encode_opcodes_(Code,cat(Ls,[?OPCODE2(?JOP(array),N)|Acc]),Map);    
+    OP = ?OPCODE2(?JOP(array),N),
+    encode_opcodes_(Code,cat(Ls,[OP|Acc]),Map);    
 encode_opcodes_([{array,Kv,Es}|Code],Acc,Map) ->
     N = length(Es),
     K = variant_length(Kv),
@@ -878,19 +968,23 @@ encode_opcodes_([{array,Kv,Es}|Code],Acc,Map) ->
     Ns = encode_integer(N,K),
     Is = [encode_integer(X,Ke) || {literal,_,X} <- Es],
     Ls = Ns ++ lists:append(Is),
-    encode_opcodes_(Code,cat(Ls,[?OPCODE1(?JOP(array),Kc)|Acc]),Map);
+    OP = ?OPCODE1(?JOP(array),Kc),
+    encode_opcodes_(Code,cat(Ls,[OP|Acc]),Map);
 %% SYS
 encode_opcodes_([{sys,Sys}|Code],Acc,Map) ->
-    encode_opcodes_(Code, [Sys,?OPCODE0(?OP(sys))|Acc],Map);
+    OP = ?OPCODE0(?OP(sys)),
+    encode_opcodes_(Code, [Sys,OP|Acc],Map);
 encode_opcodes_([{Op1,Op2}|Code],Acc,Map) ->
     N1 = maps:get(Op1,Map),
     N2 = maps:get(Op2,Map),
     if N1 < 8, N2 < 8 -> true end,
-    encode_opcodes_(Code,[?OPCODE3(N1,N2)|Acc],Map);
+    OP = ?OPCODE3(N1,N2),
+    encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([Op|Code], Acc, Map) ->
     N = maps:get(Op,Map),
-    if N < 32 -> true end,
-    encode_opcodes_(Code,[?OPCODE0(N)|Acc],Map);
+    if N < 64 -> true end,
+    OP = ?OPCODE0(N),
+    encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([], Acc, _Map) ->
     list_to_binary(lists:reverse(Acc)).
 
@@ -1036,7 +1130,6 @@ exec_('0<',[A|Xs])     -> [{'0<',A}|Xs];
 exec_('not',[A|Xs])    -> [{'not',A}|Xs];
 exec_('/',[B,A|Xs])   -> [{'/',A,B}|Xs];
 exec_('negate',[A|Xs])    -> [{'negate',A}|Xs];
-exec_('invert',[A|Xs])    -> [{'invert',A}|Xs];
 exec_('shift',[B,A|Xs])    -> [{'<<',A,B}|Xs];
 exec_(nop, Xs)         -> Xs;
 exec_({const,C},Xs) -> [C|Xs].
@@ -1079,7 +1172,6 @@ min_depth_('not') -> {1,1};
 min_depth_('/')   -> {2,1};
 min_depth_('xor')  -> {2,1};
 min_depth_('negate') -> {1,1};
-min_depth_('invert') -> {1,1};
 min_depth_('shift')  -> {2,1};
 min_depth_('1+') -> {1,1};
 min_depth_('1-') -> {1,1};

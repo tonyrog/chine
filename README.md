@@ -38,6 +38,12 @@ of architectures.
 | []        | ( caddr i -- n )
 | execute   | ( caddr -- )
 
+| fp@       | ( -- fp )    | ( fetch frame pointer )
+| fp!       | ( fp -- )    | ( set frame pointer )
+| sp@       | ( -- sp )    | ( fetch stack pointer )
+| sp!       | ( sp -- )    | ( set stack pointer )
+
+
 ## INSTRUCTIONS jop
 
 | opname    |  stack effect       | comment            |
@@ -51,6 +57,11 @@ of architectures.
 | literal   | ( -- n )            |                    |
 | array     | ( -- caddr )        |                    |
 
+Extended instructions
+
+| opname    |  stack effect       | comment             |
+|-----------|---------------------|---------------------|
+| arg <i>   | ( -- ai )           |  push relative fp   |
 
 ## compiler built-ins min,max,abs ...
 
@@ -104,6 +115,9 @@ of architectures.
 	  if setbit else clrbit then ;
 
 	: jmp* ( caddr -- ) >r exit ;
+	
+	: fenter ( -- ) fp@ >r sp@ fp! ;
+	: fleave ( -- ) fp@ r> fp! sp! ;
 	  
 ## non branch alternatives ( mostly for fun )
 
@@ -138,33 +152,50 @@ of architectures.
 
 ## System calls
 
-| Name                | Code | Stack effect|comment|
-|---------------------|------|-------------|-------|
-| param@         | ( i si -- v )     |       |
-| param!         | ( i si v -- )    |       |
-| timer_init     | ( i -- )         |       |
-| timer_start    | ( i -- )         |       |
-| timer_stop     | ( i -- )         |       |
-| timer_timeout  | ( i -- )         |       |
-| timer_running  | ( i -- )         |       |
-| input@         | ( i k -- v )     |       |
-| select_timer   | ( i -- )         |       |
-| deselect_timer | ( i -- )         |       |
-| select_input   | ( i -- )         |       |
-| dselect_input  | ( i -- )         |       |
-| deselect_all   | ( -- )           |       |
-| uart_send      | ( c -- )      |       |
-| uart_recv      | ( -- c )      |       |
-| uart_avail     | ( -- f )         |       |
-| timer_now      | ( -- u )         | ms sinc system start |
-| gpio_input     | ( i -- )         |       |
-| gpio_output    | ( i -- )         |       |
-| gpio_set       | ( i -- )         |       |
-| gpio_clr       | ( i -- )         |       |
-| gpio_get       | ( i -- n )       |       |
-| analog_send    | ( i u16 -- )     |       |
-| analog_recv    | ( i -- u16 )     |       |
-| can_send       | ( u16 si n -- )  |       |
+Stack effects are written as ( before -- after ) where
+stacks are describes as " last ... 2nd top "  that is
+top is to the right, the order it is typed in.
+
+| Name            | Stack effect     |Comment|
+|-----------------|------------------|-------|
+| now             | ( -- u )         | ms sinc system start |
+| emit            | ( c -- )         |       |
+| recv            | ( -- c )         |       |
+| avail           | ( -- f )         |       |
+| param@          | ( i si -- v )    |       |
+| param!          | ( i si v -- )    |       |
+| timer\_init     | ( i -- )         |       |
+| timer\_start    | ( i -- )         |       |
+| timer\_stop     | ( i -- )         |       |
+| timer\_timeout  | ( i -- )         |       |
+| timer\_running  | ( i -- flag )    |       |
+| input@          | ( i k -- v )     |       |
+| select\_timer   | ( i -- )         |       |
+| deselect\_timer | ( i -- )         |       |
+| select\_input   | ( i -- )         |       |
+| dselect\_input  | ( i -- )         |       |
+| deselect\_all   | ( -- )           |       |
+| gpio\_input     | ( i -- )         |       |
+| gpio\_output    | ( i -- )         |       |
+| gpio\_set       | ( i -- )         |       |
+| gpio\_clr       | ( i -- )         |       |
+| gpio\_get       | ( i -- n )       |       |
+| analog\_send    | ( i u16 -- )     |       |
+| analog\_recv    | ( i -- u16 )     |       |
+| uart\_connect   | ( baud mode tty -- fd t | err f ) | |
+| uart\_send      | ( fd u8 -- t | err f ) | |
+| uart\_recv      | ( fd -- u8 t | err f ) | |
+| uart\_avail     | ( fd -- flag ) | |
+| can\_disconnect | ( fd -- t | err f ) | |
+| can\_connect    | ( bitrate mode dev -- fd t | err f )
+| can\_send       | ( fd fid len A B -- t | err f )
+| can\_recv       | ( fd -- A B len fid t | 0 fid t | err f )
+| can\_avail      | ( fd -- flag )
+| can\_disconnect | ( fd -- t | err f )
+| file\_open      | ( name flags -- fd t | fd f ) | |
+| file\_write     | ( fd buf n -- n t | err f ) | |
+| file\_read      | ( fd buf n -- n t | err f ) | |
+| file\_close     | ( fd -- t | err f ) | |
 
 # Source format
 

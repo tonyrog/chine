@@ -14,13 +14,14 @@ extern int32_t chine_unix_sys(chine_t* mp,
 int32_t test_code_pop(uint8_t* prog, size_t len)
 {
     chine_t m;
-    int i, r;
+    int r;
     uint8_t  imask[NUM_IBYTES];   // input mask
     timeout_t tmo = 0xffffffff;
 
+    memset(m.stack, 0xff, sizeof(m.stack));    
     chine_init(&m, prog, chine_unix_sys);
-    for (i = 0; i < MAX_STACK; i++)
-	m.stack[i] = -1;
+    chine_set_ip(&m, 0);
+
 again:
     chine_run(&m);
     memset(imask, 0, sizeof(imask));
@@ -59,10 +60,10 @@ void test_arithmetic()
     uint8_t prog6[] = { PUSH8(105), PUSH8(34), AND, YIELD };
     uint8_t prog7[] = { PUSH8(105), PUSH8(34), OR, YIELD };
     uint8_t prog8[] = { PUSH8(105), PUSH8(34), XOR, YIELD };
-    uint8_t prog9[] = { PUSH8(105), NEG, YIELD };
-    uint8_t prog10[] = { PUSH8(105), INV, YIELD };
+    uint8_t prog9[] = { PUSH8(105), NEGATE, YIELD };
+    uint8_t prog10[] = { PUSH8(105), NOT, YIELD };
     uint8_t prog11[] = { PUSH8(105),  PUSHi(2), SHFT, YIELD };
-    uint8_t prog12[] = { PUSH8(-105), PUSHi(2), NEG, SHFT, YIELD };
+    uint8_t prog12[] = { PUSH8(-105), PUSHi(2), NEGATE, SHFT, YIELD };
     uint8_t prog13[] = { PUSH8(-105), PUSHi(2), S_ASR, YIELD };
 
     assert(test_code_pop(prog1, sizeof(prog1)) == 139);
@@ -81,6 +82,47 @@ void test_arithmetic()
     assert(test_code_pop(prog13, sizeof(prog13)) == -27);
 }
 
+// test logic operators
+void test_logic()    
+{
+    uint8_t prog11[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_TRUE), AND, YIELD };
+    uint8_t prog12[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_TRUE), AND, YIELD };
+    uint8_t prog13[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_FALSE), AND, YIELD };
+    uint8_t prog14[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_FALSE), AND, YIELD };
+
+    uint8_t prog21[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_TRUE), OR, YIELD };
+    uint8_t prog22[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_TRUE), OR, YIELD };
+    uint8_t prog23[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_FALSE), OR, YIELD };
+    uint8_t prog24[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_FALSE), OR, YIELD };
+
+    uint8_t prog31[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_TRUE), XOR, YIELD };
+    uint8_t prog32[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_TRUE), XOR, YIELD };
+    uint8_t prog33[] = { PUSH8(CHINE_TRUE), PUSH8(CHINE_FALSE), XOR, YIELD };
+    uint8_t prog34[] = { PUSH8(CHINE_FALSE), PUSH8(CHINE_FALSE), XOR, YIELD };
+
+    uint8_t prog41[] = { PUSH8(CHINE_TRUE), NOT, YIELD };
+    uint8_t prog42[] = { PUSH8(CHINE_FALSE), NOT, YIELD };
+
+    assert(test_code_pop(prog11, sizeof(prog11)) == CHINE_TRUE);
+    assert(test_code_pop(prog12, sizeof(prog12)) == CHINE_FALSE);
+    assert(test_code_pop(prog13, sizeof(prog13)) == CHINE_FALSE);
+    assert(test_code_pop(prog14, sizeof(prog14)) == CHINE_FALSE);
+
+    assert(test_code_pop(prog21, sizeof(prog21)) == CHINE_TRUE);
+    assert(test_code_pop(prog22, sizeof(prog22)) == CHINE_TRUE);
+    assert(test_code_pop(prog23, sizeof(prog23)) == CHINE_TRUE);
+    assert(test_code_pop(prog24, sizeof(prog24)) == CHINE_FALSE);
+
+    assert(test_code_pop(prog31, sizeof(prog31)) == CHINE_FALSE);
+    assert(test_code_pop(prog32, sizeof(prog32)) == CHINE_TRUE);
+    assert(test_code_pop(prog33, sizeof(prog33)) == CHINE_TRUE);
+    assert(test_code_pop(prog34, sizeof(prog34)) == CHINE_FALSE);
+
+    assert(test_code_pop(prog41, sizeof(prog41)) == CHINE_FALSE);
+    assert(test_code_pop(prog42, sizeof(prog42)) == CHINE_TRUE);    
+}
+
+
 void test_comp()
 {
     uint8_t prog1[] = { PUSH8(105), ZEQ, YIELD };
@@ -92,14 +134,14 @@ void test_comp()
     uint8_t prog7[] = { PUSH32(0xffff0002), PUSH32(0xffff0001), S_ULT, YIELD };
     uint8_t prog8[] = { PUSH32(0xffff0002), PUSH32(0xffff0002), S_ULE, YIELD };
     
-    assert(test_code_pop(prog1, sizeof(prog1)) == 0);
-    assert(test_code_pop(prog2, sizeof(prog2)) == 1);
-    assert(test_code_pop(prog3, sizeof(prog3)) == 1);
-    assert(test_code_pop(prog4, sizeof(prog4)) == 0);
-    assert(test_code_pop(prog5, sizeof(prog5)) == 0);
-    assert(test_code_pop(prog6, sizeof(prog6)) == 1);
-    assert(test_code_pop(prog7, sizeof(prog7)) == 0);
-    assert(test_code_pop(prog8, sizeof(prog8)) == 1);
+    assert(test_code_pop(prog1, sizeof(prog1)) == CHINE_FALSE);
+    assert(test_code_pop(prog2, sizeof(prog2)) == CHINE_TRUE);
+    assert(test_code_pop(prog3, sizeof(prog3)) == CHINE_TRUE);
+    assert(test_code_pop(prog4, sizeof(prog4)) == CHINE_FALSE);
+    assert(test_code_pop(prog5, sizeof(prog5)) == CHINE_FALSE);
+    assert(test_code_pop(prog6, sizeof(prog6)) == CHINE_TRUE);
+    assert(test_code_pop(prog7, sizeof(prog7)) == CHINE_FALSE);
+    assert(test_code_pop(prog8, sizeof(prog8)) == CHINE_TRUE);
 }
 
 void test_misc()
@@ -194,11 +236,11 @@ void test_call()
 
 void test_syscall()
 {
-    uint8_t prog0[] = { PUSH8('w'), SYS, SYS_UART_SEND,
-			PUSH8('a'), SYS, SYS_UART_SEND,
-			PUSH8('i'), SYS, SYS_UART_SEND,
-			PUSH8('t'), SYS, SYS_UART_SEND,
-			PUSH8('\n'), SYS, SYS_UART_SEND,
+    uint8_t prog0[] = { PUSH8('w'), SYS, SYS_EMIT,
+			PUSH8('a'), SYS, SYS_EMIT,
+			PUSH8('i'), SYS, SYS_EMIT,
+			PUSH8('t'), SYS, SYS_EMIT,
+			PUSH8('\n'), SYS, SYS_EMIT,
 			PUSH8(5),
 			YIELD};
 
@@ -213,19 +255,19 @@ void test_syscall()
 			 YIELD,
 			 JOP8(JMP,-18) };
 
-    uint8_t prog9[] = { PUSH8('>'), SYS, SYS_UART_SEND,
-			PUSH8(' '), SYS, SYS_UART_SEND,
+    uint8_t prog9[] = { PUSH8('>'), SYS, SYS_EMIT,
+			PUSH8(' '), SYS, SYS_EMIT,
 			// LABEL L1
-			SYS, SYS_UART_RECV,
-			DUP, SYS, SYS_UART_SEND,
+			SYS, SYS_RECV,
+			DUP, SYS, SYS_EMIT,
 			PUSH8('\n'), S_EQ,
 			JOP8(JMPZ,-10),
 			PUSHi(1),
 			YIELD};
 
-    uint8_t prog10[] = { PUSH8('o'), SYS, SYS_UART_SEND,
-			 PUSH8('k'), SYS, SYS_UART_SEND,
-			 PUSH8('\n'), SYS, SYS_UART_SEND,
+    uint8_t prog10[] = { PUSH8('o'), SYS, SYS_EMIT,
+			 PUSH8('k'), SYS, SYS_EMIT,
+			 PUSH8('\n'), SYS, SYS_EMIT,
 			 PUSH8(3),
 			 YIELD};
     assert(test_code_pop(prog0, sizeof(prog0)) == 5);
@@ -238,9 +280,9 @@ void test_loop()
 {
     uint8_t prog0[] = { PUSH8(10),
 			TOR,
-			RFETCH,PUSH8(64),ADD,SYS,SYS_UART_SEND,
+			RFETCH,PUSH8(64),ADD,SYS,SYS_EMIT,
 			JOP8(JNEXT,-8),
-			PUSH8(10),SYS,SYS_UART_SEND,
+			PUSH8(10),SYS,SYS_EMIT,
 			PUSH8(10),
 			YIELD };
     assert(test_code_pop(prog0, sizeof(prog0)) == 10);
@@ -253,6 +295,8 @@ int main()
     printf("test_arithmetic\n");
     test_arithmetic();
     printf("test_comp\n");
+    test_logic();
+    printf("test_logic\n");    
     test_comp();
     printf("test_misc\n");
     test_misc();

@@ -1,5 +1,5 @@
 
-#include "../include/chine.h"
+#include "chine.h"
 
 // #if defined(ARDUINO)
 // #include <avr/pgmspace.h>
@@ -9,7 +9,7 @@
 
 chine_t m;
 
-#include "blink.prog"
+#include "blink.h"
 
 extern int chine_arduino_sys(chine_t* mp,
 			     cell_t sysop, cell_t* revarg,
@@ -18,6 +18,9 @@ extern int chine_arduino_sys(chine_t* mp,
 void setup()
 {
     chine_init(&m, prog, chine_arduino_sys);
+    chine_set_ip(&m, SYM_init);
+    chine_run(&m);
+    chine_set_ip(&m, SYM_run);    
 }
 
 void loop()

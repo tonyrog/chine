@@ -193,10 +193,7 @@ int main(int argc, char** argv)
 
     if ((offset = lookup(symb_start, symb_end, "init")) >= 0) {
 	chine_set_ip(&m, offset);
-	if (chine_run(&m) < 0) {
-	    fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
-	    exit(1);
-	}
+	if (chine_run(&m) < 0) goto fail;
     }
     
     if ((offset = lookup(symb_start, symb_end, "run")) < 0) {
@@ -210,10 +207,8 @@ again:
     if (chine_is_top_level(&m))
 	chine_set_ip(&m, offset);
 
-    if (chine_run(&m) < 0) {
-	fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
-	goto final;
-    }
+    if (chine_run(&m) < 0) goto final;
+
     tmo = 0xffffffff;
     memset(&imask, 0, sizeof(imask));
 
@@ -227,12 +222,19 @@ again:
 
 final:
     if ((offset = lookup(symb_start, symb_end, "final")) >= 0) {
+	int prev_fail = m.cErr;
 	chine_set_ip(&m, offset);
 	if (chine_run(&m) < 0) {
-	    fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
-	    exit(1);
+	    m.cErr = prev_fail;
+	    goto fail;
 	}
     }
     // printf("TOS = %d\n", m.cSP[0]);
     exit(0);
+fail:
+    if (m.cErr != FAIL_TERMINATE) {
+	fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
+	exit(1);
+    }
+    exit(0);    
 }

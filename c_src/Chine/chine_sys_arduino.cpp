@@ -5,7 +5,7 @@
 #include "Arduino.h"
 #include "HardwareSerial.h"
 
-#include "../include/chine.h"
+#include "chine.h"
 
 #define INDEX_TYPE     0x2701  // UNSIGNED8  - type code
 #define INDEX_DELAY    0x2710  // UNSIGNED32 - time
@@ -74,18 +74,46 @@ int chine_arduino_sys(chine_t* mp,
 	Serial.begin(9600);
 	return 0;
     }
+
     case SYS_TERMINATE: {
 	*npop = 0;
 	return FAIL_TERMINATE;
     }
+
+    case SYS_NOW: {
+	*npop = 0;
+	*value = chine_millis();
+	return 1;
+    }
+
+    case SYS_EMIT: {
+	*npop = 1;
+	Serial.write(revarg[0]);
+	return 0;
+    }
+
+    case SYS_AVAIL: {
+	*npop = 0;
+	*value = Serial.available();
+	return 1;
+    }
+
+    case SYS_RECV: {
+	*npop = 0;
+	*value = Serial.read();
+	return 1;
+    }
+
     case SYS_PARAM_FETCH: {
 	*npop = 2;
 	return fetch(revarg[1], revarg[0], value);
     }
+
     case SYS_PARAM_STORE: {
 	*npop = 3;
 	return store(revarg[2], revarg[1], revarg[0]);
     }
+
     case SYS_TIMER_STOP: // same as init
     case SYS_TIMER_INIT: {
 	cell_t i = revarg[0];
@@ -95,6 +123,7 @@ int chine_arduino_sys(chine_t* mp,
 	mp->timer[i] = 0;
 	return 0;
     }
+
     case SYS_TIMER_START: {
 	cell_t i = revarg[0];
 	*npop = 1;
@@ -103,28 +132,26 @@ int chine_arduino_sys(chine_t* mp,
 	mp->timer[i] = chine_millis()+param_delay[i];
 	return 0;
     }
+
     case SYS_TIMER_TIMEOUT: {
 	cell_t i = revarg[0];
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	if (!TSTBIT(mp->tbits,i))
-	    *value = 0;
+	    *value = CHINE_FALSE;
 	else
-	    *value = (chine_millis() >= mp->timer[i]);
+	    *value = CHINE_TEST(chine_millis() >= mp->timer[i]);
 	return 1;
     }
+
     case SYS_TIMER_RUNNING:  {
 	cell_t i = revarg[0];
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
-	*value = TSTBIT(mp->tbits, i) != 0;
+	*value = CHINE_TEST(TSTBIT(mp->tbits, i) != 0);
 	return 1;
     }
-    case SYS_NOW: {
-	*npop = 0;
-	*value = chine_millis();
-	return 1;
-    }
+
     case SYS_INPUT_FETCH: {  // ( i k -- v )
 	cell_t k = revarg[0];
 	cell_t i = revarg[1];
@@ -186,26 +213,13 @@ int chine_arduino_sys(chine_t* mp,
 	CLRBIT(mp->tmask, i);
 	return 0;
     }
-    case SYS_UART_SEND: {
-	*npop = 1;
-	Serial.write(revarg[0]);
-	return 0;
-    }
-    case SYS_UART_AVAIL: {
-	*npop = 0;
-	*value = Serial.available();
-	return 1;
-    }
-    case SYS_UART_RECV: {
-	*npop = 0;
-	*value = Serial.read();
-	return 1;
-    }
+
     case SYS_GPIO_INPUT: {
 	*npop = 1;
 	pinMode(revarg[0], INPUT);
 	return 0;
     }
+	
     case SYS_GPIO_OUTPUT: {
 	*npop = 1;
 	pinMode(revarg[0], OUTPUT);
@@ -226,16 +240,78 @@ int chine_arduino_sys(chine_t* mp,
 	*value = digitalRead(revarg[0]);
 	return 1;
     }
+
     case SYS_ANALOG_SEND: {
 	*npop = 2;
 	analogWrite(revarg[1],revarg[0]>>8);
 	return 0;
     }
+
     case SYS_ANALOG_RECV: {
 	*npop = 1;
 	*value = analogRead(revarg[0])<<6;
 	return 1;
     }
+
+    case SYS_UART_CONNECT: {
+	char* tty = "tty1";
+	int baud = revarg[1];
+	int mode = revarg[2];
+	return 0;
+    }
+
+    case SYS_UART_SEND: {
+	int fd      = revarg[1];
+	uint8_t val = revarg[0];	
+	*npop = 2;
+	if (fd == 0)
+	    Serial.write(revarg[0]);
+	return 0;
+    }
+
+    case SYS_UART_RECV: {
+	int fd = revarg[0];	
+	*npop = 0;
+	if (fd == 0) {
+	    revarg[0] = Serial.read();
+	    *value = CHINE_TRUE;
+	}
+	else {
+	    revarg[0] = 666;
+	    *value = CHINE_FALSE;
+	}
+	return 1;
+    }
+	
+    case SYS_UART_AVAIL: {
+	int fd = revarg[0];	
+	*npop = 1;
+	if (fd == 0)
+	    *value = CHINE_TEST(Serial.available());
+	else
+	    *value = CHINE_FALSE;
+	return 1;
+    }
+
+    case SYS_UART_DISCONNECT: {
+	int fd    = revarg[0];
+	(void) fd;
+	*npop = 1;
+	*value = CHINE_TRUE;
+	return 1;
+    }
+
+    // SYS_CAN_CONNECT
+    // SYS_CAN_SEND	
+    // SYS_CAN_RECV
+    // SYS_CAN_DISCONNECT
+
+
+    // SYS_FILE_OPEN
+    // SYS_FILE_WRITE
+    // SYS_FILE_READ
+    // SYS_FILE_CLOSE
+	
     default:
 	*npop = 0;
 	return FAIL_INVALID_ARGUMENT;

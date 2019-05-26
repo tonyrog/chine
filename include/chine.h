@@ -23,11 +23,16 @@ extern "C" {
 #  define UNUSED_FUNCTION(x) UNUSED_ ## x
 #endif
 
+#if defined(ARDUINO)
+  #include "Arduino.h"
+  #define CHINE_INLINE
+#else
+  #define CHINE_INLINE inline
+#endif
+    
 #define FILE_VERSION_MAJOR 1
 #define FILE_VERSION_MINOR 1
 #define FILE_VERSION_PATCH 0
-
-// #define UNUSED(x) (void)(x)
 
 #define MAX_INPUT  32
 #define MAX_STACK  16  // stack + return stack
@@ -47,6 +52,15 @@ typedef uint32_t timeout_t;
 #define U32(x) ((uint32_t)(x))
 #define U16(x) ((uint16_t)(x))
 #define U8(x)  ((uint8_t)(x))
+
+#define CHINE_TRUE       -1
+#define CHINE_FALSE      0
+#define CHINE_TEST(x)    (-(!!(x)))
+
+// chine test table
+//    x  = 123   -1   0
+//  !!x  =   1    1   0
+// -!!x  =  -1   -1   0    
 
 static inline uint8_t unpack_u8(uint8_t* ptr)
 {
@@ -86,58 +100,97 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define INT16(ptr)  unpack_i16((ptr))
 #define INT32(ptr)  unpack_i32((ptr))
 
-#define OPCODE0(op)      (0x00 | ((op) & 63))
-#define OPCODE1(jop,l)   (0x40 | ((jop) & 7) | (((l) & 7) << 3)) // L+1 bytes
-#define OPCODE2(jop,l)   (0x80 | ((jop) & 7) | (((l) & 7) << 3)) // L:3/signed
-#define OPCODE3(op1,op2) (0xc0 | ((op1) & 7) | (((op2)&7) << 3))
+// OPCODE  yyxxxxxx
+#define OP0 0
+#define OP1 1
+#define OP2 2
+#define OP3 3
+#define OPMASK 0xC0
+#define OPSHFT 6
+    
+// OPCODE0 00iiiiii 64 instruction opcode
+#define OP0MASK 0x3f
+#define OPCODE0(op)    (0x00 | ((op)&OP0MASK))
 
-// opcode with argument OPCODE1 with L+1 bytes, OPCODE2 with signed L:3
+// OPCODE1 01lljjjj 16 "jump" instructions with 2 bit length indicator
+// 0=8 bit, 1=16 bit, 2=32 bit (3 = yet unassigned)
+#define OP1MASK  0x0f
+#define VAL1MASK 0x03
+#define VAL1SHFT 4
+#define OP1VAL(x) (((x)>>VAL1SHFT)&VAL1MASK)
+#define OPCODE1(jop,l) (0x40|((jop)&OP1MASK)|(((l)&VAL1MASK)<<VAL1SHFT))
+
+// OPCODE2 10aaajjj 8 "jump" instructions with 3 bit signed integer argument
+#define OP2MASK  0x07
+#define VAL2MASK 0x07
+#define VAL2SHFT 3
+#define OP2VAL(x) (((int8_t)((x)<<(8-OPSHFT)))>>(8-VAL2SHFT))
+#define OPCODE2(jop,a) (0x80|((jop)&OP2MASK)|(((a)&VAL2MASK)<<VAL2SHFT))
+
+// OPCODE3 11iiikkk 2x 8 bit packed instructions
+#define OP3MASK 0x07
+#define OP3SHFT 3
+#define OPCODE3(op1,op2) (0xc0|((op1)&OP3MASK)|(((op2)&OP3MASK)<<OP3SHFT))
+
 typedef enum {
-    JMPZ = 0,    // if (TOP == 0) goto L
-    JMPNZ,       // if (TOP != 0) goto L
-    JNEXT,       // if (--RP[0]>=0) goto L; else RP--;
-    JMPLZ,       // if (TOP < 0) goto L
-    JMP,         // goto L
-    CALL,        // call(L)
-    LITERAL,     // constant N
-    ARRAY        // Array (of constants)
+    JMPZ    = 0,    // if (TOP == 0) goto L
+    JMPNZ   = 1,    // if (TOP != 0) goto L
+    JNEXT   = 2,    // if (--RP[0]>=0) goto L; else RP--;
+    JMPLZ   = 3,    // if (TOP < 0) goto L
+    JMP     = 4,    // goto L
+    CALL    = 5,    // call(L)
+    LITERAL = 6,    // constant N
+    ARRAY   = 7,    // Array+String (of constants)
+    // OPCODE1 only
+    ARG     = 8,
+    JOP_9   = 9,
+    JOP_10  = 10,
+    JOP_11  = 11,
+    JOP_12  = 12,
+    JOP_13  = 13,
+    JOP_14  = 14,
+    JOP_15  = 15,
 } opcode1_t;
 
 typedef enum {
     // op3
-    DUP=0,        // dup ( a -- a a )
-    ROT,        // rot ( a b c  -- b c a )  ( down )
-    OVER,       // over ( a b -- b a )
-    DROP,       // drop ( a -- )
-    SWAP,       // swap ( a b -- b a )
-    SUB,        // - ( a b -- [ a-b ] )
-    ADD,        // +  ( x1 x2 -- (x1+x2) )
-    MUL,        // *: ( x1 x2 -- (x1*x2) )
+    DUP     = 0,        // dup: ( a -- a a )
+    ROT     = 1,        // rot: ( a b c  -- b c a )  ( down )
+    OVER    = 2,        // over: ( a b -- b a )
+    DROP    = 3,        // drop: ( a -- )
+    SWAP    = 4,        // swap: ( a b -- b a )
+    SUB     = 5,        // -: ( a b -- [ a-b ] )
+    ADD     = 6,        // +:  ( x1 x2 -- (x1+x2) )
+    MUL     = 7,        // *: ( x1 x2 -- (x1*x2) )
     // op6
-    NOP,        // nop: ( -- )
-    AND,        // and: ( a b -- (a&b) )
-    OR,         // or: ( a b -- (a|b) )
-    XOR,        // ( a b -- (a^b) )
-    ZEQ,        // 0=:  ( a -- (a==0) )
-    ZLT,        // 0<:  ( a -- (a<0) )
-    NOT,        // not: ( a -- not a)
-    INV,        // invert ( a -- (~a) )
-    NEG,        // negate ( a -- (-a) )
-    DIV,        // / ( a b -- (a/b) )
-    SHFT,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
-    STORE,      // ! ( a i -- )
-    FETCH,      // @ ( i -- a )
-    TOR,        // >r ( n -- ) R: ( -- n )
-    FROMR,      // r> R: ( n -- ) ( -- n )
-    RFETCH,     // r@: R: ( n -- n ) ( -- n )
-    EXIT,       // exit/; ( -- ) R: ( addr -- )
-    SYS,        // sys ( x1 .. xn -- y1 )
-    YIELD,      // ( -- )
-    ELEM,       // [] ( a* i -- n )
-    EXEC,       // execute ( a* i -- )
-    // OP_29,
-    // OP_30,
-    // OP_31
+    NOP     = 8,        // nop: ( -- )
+    AND     = 9,        // and: ( a b -- (a&b) )
+    OR      = 10,       // or: ( a b -- (a|b) )
+    XOR     = 11,       // ^: ( a b -- (a^b) )
+    ZEQ     = 12,       // 0=:  ( a -- (a==0) )
+    ZLT     = 13,       // 0<:  ( a -- (a<0) )
+    NOT     = 14,       // not: ( a -- (~a) )
+    OP_15   = 15,       // unassigned
+    NEGATE  = 16,       // negate: ( a -- (-a) )
+    DIV     = 17,       // / ( a b -- (a/b) )
+    SHFT    = 18,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
+    STORE   = 19,       // ! ( a i -- )
+    FETCH   = 20,       // @ ( i -- a )
+    TOR     = 21,       // >r ( n -- ) R: ( -- n )
+    FROMR   = 22,       // r> R: ( n -- ) ( -- n )
+    RFETCH  = 23,       // r@: R: ( n -- n ) ( -- n )
+    EXIT    = 24,       // exit/; ( -- ) R: ( addr -- )
+    SYS     = 25,       // sys ( x1 .. xn -- y1 )
+    YIELD   = 26,       // ( -- )
+    ELEM    = 27,       // [] ( a* i -- n )
+    EXEC    = 28,       // execute ( a* i -- )
+    FPFETCH = 29,       // fp@ ( -- fp )
+    FPSTORE = 30,       // fp! ( fp -- )
+    SPFETCH = 31,       // sp! ( -- sp )
+    SPSTORE = 32,       // sp@ ( sp -- )
+    OP_33   = 33,
+    //...
+    OP_63   = 63
 } opcode_t;
 
 #define ARG8(x)   U8((x))
@@ -170,7 +223,7 @@ typedef enum {
 // : <
 #define S_LT  SUB, ZLT
 // : abs
-#define S_ABS DUP, ZLT, JOP8(JMPZ,1), NEG
+#define S_ABS DUP, ZLT, JOP8(JMPZ,1), NEGATE
 // : max 
 #define S_MIN OPOP(OVER,OVER),SUB,ZLT,JOP8(JMPZ,3),DROP,	\
 	JOP8(JMP,1),OPOP(SWAP,DROP)
@@ -183,7 +236,7 @@ typedef enum {
 #define S_MOD OPOP(OVER,OVER), DIV, OPOP(MUL,SUB)
 // : arshift
 #define S_ASR DUP,PUSH8(32),OPOP(SWAP,SUB),	\
-	PUSHi(-1),SWAP,SHFT,ROT,ROT,NEG,SHFT,OR
+	PUSHi(-1),SWAP,SHFT,ROT,ROT,NEGATE,SHFT,OR
 // : 0<= 1- 0< ;
 #define S_ZLE PUSHi(1),SUB,ZLT
 // : 2dup
@@ -194,6 +247,9 @@ typedef enum {
 // : u<=  2dup xor 0< if swap drop 0< else - 0<= then ;
 #define S_ULE S_2DUP, XOR, ZLT, JOP8(JMPZ,4),	\
 	OPOP(SWAP,DROP), ZLT, JOP8(JMP,6), SUB, S_ZLE
+
+#define FENTER FPFETCH, TOR, SPFETCH, FPSTORE
+#define FLEAVE FPFETCH, FROMR, FPSTORE, SPSTORE
 
 // Failure codes
 #define FAIL_INVALID_ARGUMENT       -1
@@ -207,9 +263,14 @@ typedef enum {
 
 // SYSTEM CALLS
 typedef enum {
-    SYS_INIT = 0,      // ( -- )  called at init
-    SYS_PARAM_FETCH,   // ( i s -- n )
-    SYS_PARAM_STORE,   // ( v i s -- )
+    SYS_INIT = 0,      // ( -- )       called at init
+    SYS_TERMINATE,     // ( -- )       terminate the program
+    SYS_NOW,           // ( -- u )     milliseconds since start
+    SYS_EMIT,          // ( c -- )     transmit on default output
+    SYS_RECV,          // ( -- c )     receive from default input
+    SYS_AVAIL,         // ( -- f )     check if default input is available
+    SYS_PARAM_FETCH,   // ( s i -- n )
+    SYS_PARAM_STORE,   // ( s i v -- )
     SYS_TIMER_INIT,    // ( i -- )
     SYS_TIMER_START,    // ( i --  )
     SYS_TIMER_STOP,     // ( i --  )
@@ -222,10 +283,11 @@ typedef enum {
     SYS_SELECT_INPUT,   // ( i -- )
     SYS_DESELECT_INPUT, // ( i -- )
     SYS_DESELECT_ALL,   // ( -- )
-    SYS_UART_SEND,      // ( c -- )     tx character on default uart
-    SYS_UART_RECV,      // (   -- c )   rx character from uart or -1
-    SYS_UART_AVAIL,     // (   -- f )   1 if char is read 0 otherwise
-    SYS_NOW,            // ( -- u )     milliseconds since start
+    SYS_UART_CONNECT,   // ( mode baud str -- 1 fd | 0 err )
+    SYS_UART_SEND,      // ( fd tty -- 1 | 0 )  tx character on uart
+    SYS_UART_RECV,      // ( fd -- c )  rx character from uart or -1
+    SYS_UART_AVAIL,     // ( fd -- f )  1 if char is read 0 otherwise
+    SYS_UART_DISCONNECT,// ( fd -- f )  disconnet uart
     SYS_GPIO_INPUT,     // ( i -- )
     SYS_GPIO_OUTPUT,    // ( i -- )
     SYS_GPIO_SET,       // ( i -- )
@@ -233,8 +295,15 @@ typedef enum {
     SYS_GPIO_GET,       // ( i -- n )
     SYS_ANALOG_SEND,    // ( i u16 -- )
     SYS_ANALOG_RECV,    // ( i -- u16 )
-    SYS_CAN_SEND,       // ( i u16 n -- )
-    SYS_TERMINATE       // ( -- )
+    SYS_CAN_CONNECT,    // ( mode bitrate dev -- 1 fd | 0 err )
+    SYS_CAN_SEND,       // ( n fd buf -- 1 n | 0 err )
+    SYS_CAN_RECV,       // ( fd buf -- 1 n | 0 err )
+    SYS_CAN_AVAIL,      // ( fd -- f )
+    SYS_CAN_DISCONNECT, // ( fd -- 1 | 0 err )
+    SYS_FILE_OPEN,      // ( mode str -- 1 fd | 0 err )
+    SYS_FILE_WRITE,     // ( n fd buf -- 1 n | 0 err )
+    SYS_FILE_READ,      // ( n fd buf -- 1 n | 0 err )
+    SYS_FILE_CLOSE,     // ( fd -- 1 | 0 err )
 } syscall_t;
 
 // LED interface set_led / clr_led
@@ -250,6 +319,7 @@ typedef struct _chine_t
     uint8_t* cIP;
     cell_t*  cSP;
     cell_t*  cRP;
+    cell_t*  cFP;      // frame pointer
     cell_t   cErr;     // last system error
     int (*sys)(struct _chine_t* mp,
 	       cell_t sysop, cell_t* revarg,
@@ -262,6 +332,61 @@ typedef struct _chine_t
     uint8_t  tmask[NUM_TBYTES];   // selected timers
     timeout_t timer[MAX_TIMERS];  // timers
 } chine_t;
+
+// get argument
+// opcode1: I = 01llxxxx
+// opcode2: I = 10aaaxxx aaa is signed 3-bit argument
+// 
+static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
+{
+    if ((I >> OPSHFT) == OP2) { // extract 3 bit signed number
+	*argp = OP2VAL(I);
+	return 0;
+    }
+    else {  // opcode1
+	switch(OP1VAL(I)) {
+	case 0:  *argp=INT8(ptr);   return 1;
+	case 1:  *argp=INT16(ptr);  return 2;
+	case 2:  *argp=INT32(ptr);  return 4;
+	default: *argp=0; return 0;
+	}
+    }
+}
+
+// Get number of bytes of of array length
+// opcode2: I = 10|lll|111  => 0
+// opcode1: I = 01|0-|0111  => 1
+// opcode1: I = 01|1-|0111  => 2
+static CHINE_INLINE int get_array_hlen(uint8_t I)
+{
+    uint8_t H = (I >> 5) & 3;
+    return H ? (H-1) : 0;
+}
+
+static CHINE_INLINE int get_array_len(uint8_t I, uint8_t* ptr, cell_t* argp)
+{
+    switch(get_array_hlen(I)) {
+    case 0: *argp = (I>>VAL2SHFT) & VAL2MASK; return 0;
+    case 1: *argp = UINT8(ptr);  return 1;
+    case 2: *argp = UINT16(ptr); return 2;
+    default: return 0;
+    }
+}
+
+// Get number of bytes per array element
+// 10|lll|111  => 1
+// 01|00|0111  => 1
+// 01|01|0111  => 2
+// 01|10|0111  => 4
+// 01|11|0111  => 8 but is undefined right now!
+
+static CHINE_INLINE int get_element_len(uint8_t I)
+{
+    if ((I >> OPSHFT) == OP2)
+	return 1;
+    else
+	return (1 << ((I>>VAL1SHFT) & VAL1MASK));
+}
 
 extern void chine_init(chine_t* mp, uint8_t* prog, 
 		       int  (*sys)(chine_t* mp,
