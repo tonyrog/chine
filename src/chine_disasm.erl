@@ -135,15 +135,24 @@ dis_opcodes(<<0:2, OP:6, Content/binary>>, Addr, SymTab, Code) ->
 	      _ -> {{unknown,OP}}
 	  end,
     dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
-dis_opcodes(<<1:2, L:2, ?ARRAY:4, Len:(1 bsl L), String:Len/binary,
-	      Content/binary>>,
-	    Addr, SymTab, Code) ->
-    %% uint3x8  0-7 8 bit characters
-    Op = {array,{uint3x8,Len},String},
-    dis_opcodes(Content, Addr+1+Len, SymTab, [Op|Code]);
+
+dis_opcodes(<<1:2, L:2, ?ARRAY:4, Content/binary>>, Addr, SymTab, Code) ->
+    {M,E,Variant} =
+	case L of
+	    0 -> {3, 3, uint8x8};
+	    1 -> {3, 4, uint8x16};
+	    2 -> {4, 5, uint16x32};
+	    3 -> {4, 6, uint16x64}
+	end,
+    EL = (1 bsl E), %% 8,16,32,64
+    LL = (1 bsl M), %% 8,8,16,16
+    <<Len:LL, Data:(Len*(EL div 8))/binary, Content1/binary>> = Content,
+    Array = [Ei || <<Ei:EL>> <= Data],
+    Op = {array,{Variant,Len},Array},
+    dis_opcodes(Content1, Addr+1+L+Len*LL, SymTab, [Op|Code]);
+
 dis_opcodes(<<1:2, L:2, JOP:4, A:(1 bsl L)/signed-unit:8, Content/binary>>,
 	    Addr, SymTab, Code) ->
-
     {Int,UInt} = case L of
 		     0 -> {int8,uint8};
 		     1 -> {int16,uint16};
@@ -163,22 +172,13 @@ dis_opcodes(<<1:2, L:2, JOP:4, A:(1 bsl L)/signed-unit:8, Content/binary>>,
 	      _ -> {{unknown,JOP},{Int,A}}
 	  end,
     dis_opcodes(Content, Addr+1+(1 bsl L), SymTab, [OpA|Code]);
-dis_opcodes(<<2:2, V:3, ?ARRAY:3, Content/binary>>, Addr, SymTab, Code) ->
-    {L,E,Variant} =
-	case V of
-	    0 -> {1, 1, uint8x8};
-	    1 -> {1, 2, uint8x16};
-	    2 -> {1, 4, uint8x32};
-	    4 -> {2, 2, uint16x8};
-	    5 -> {2, 2, uint16x16};
-	    6 -> {2, 4, uint16x32}
-	end,
-    EL = (1 bsl E),
-    LL = (1 bsl L),
-    <<Len:LL, Data:(Len*L)/binary, Content1/binary>> = Content,
-    Array = [Ei || <<Ei:EL>> <= Data],
-    Op = {array,{Variant,Len},Array},
-    dis_opcodes(Content1, Addr+1+L+Len*LL, SymTab, [Op|Code]);
+
+dis_opcodes(<<2:2, L:3, ?ARRAY:3, String:L/binary, Content/binary>>,
+	    Addr, SymTab, Code) ->
+    %% uint3x8  0-7 8 bit characters
+    Op = {array,{uint3x8,L},String},
+    dis_opcodes(Content, Addr+1+L, SymTab, [Op|Code]);
+
 dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>, 
 	    Addr, SymTab, Code) ->
     OpA = case JOP+2 of
@@ -188,8 +188,8 @@ dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>,
 	      #jopcode.jmplz -> {jmplz,{int3,A}};
 	      #jopcode.jmp   -> {jmp,{int3,A}};
 	      #jopcode.call  -> {call,{int3,A}};
-	      #jopcode.literal -> {literal,{int3,A}};
-	      #jopcode.array   -> {array,{uint3,unsigned(uint3,A)}}
+	      #jopcode.literal -> {literal,{int3,A}}
+	      %%#jopcode.array   -> {array,{uint3,unsigned(uint3,A)}}
 	  end,
     dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
 

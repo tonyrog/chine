@@ -847,14 +847,11 @@ encode_literal(I) when is_integer(I) ->
     {literal,type_integer(I), I}.
 
 type_integer(I) when is_integer(I) ->
-    if I >= -4, I =< 3 ->
-	    int3;
-       I >= -16#80, I =< 16#7f ->
-	    int8;
-       I >= -16#8000, I =< 16#7fff ->
-	    int16;
-       I >= -16#80000000, I =< 16#7fffffff ->
-	    int32
+    if I >= -4, I =< 3 -> int3;
+       I >= -16#80, I =< 16#7f -> int8;
+       I >= -16#8000, I =< 16#7fff -> int16;
+       I >= -16#80000000, I =< 16#7fffffff -> int32;
+       I =< 16#ffffffff -> uint32
     end.
 
 %% 
