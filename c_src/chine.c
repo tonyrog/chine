@@ -126,120 +126,76 @@ typedef struct {
     int after;
 } instr_info_t;
 
-static const instr_info_t jop_name[] = { // opcode1 and opcode2
-    { "jmpz", 1, 0 },
-    { "jmpnz", 1, 0 },
-    { "next", 0, 0},
-    { "jmplz", 1, 0 },
-    { "jmp", 0, 0 },
-    { "call", 0, 0 },
-    { "literal", 0, 1},
-    { "array", 0, 1 },
-    { "arg", 0, 1 },  // opcode1
-};
-
 static const instr_info_t op_name[] = {
-    // opcode0, opcode3
-    { "dup", 1, 2},
-    { "rot", 3, 3},
-    { "over", 2, 3},
-    { "drop", 1, 0 },
-    { "swap", 2, 2 },
-    { "-", 2, 1 },
-    { "+", 2, 1 },
-    { "*", 2, 1 },
-    // opcode0
-    { "nop", 0, 0 },
-    { "and", 2, 1 },
-    { "or", 2, 1 },
-    { "xor", 2, 1 },
-    { "0=", 1, 1 },
-    { "0<", 1, 1, },
-    { "not", 1, 1 },
-    { "???", 0, 0 },
-    { "negate", 1, 1 },
-    { "/", 2, 1 },
-    { "shift", 2, 1},
-    { "!", 2, 0 },
-    { "@", 1, 1 },
-    { ">r", 1, 0 },
-    { "r>", 0, 1 },
-    { "r@", 0, 1 },
-    { "exit", 0, 0 },
-    { "sys", 0, 0 },
-    {"yield", 0, 0 },
-    { "[]", 2, 1 },
-    { "execute", 1, 0 },
-    { "fp@", 0, 1 },
-    { "fp!", 1, 0 },
-    { "sp@", 0, 1 },
-    { "sp!", 1, 0 },
+    [DUP]  = { "dup",  1, 2 },
+    [ROT]  = { "rot",  3, 3 },
+    [OVER] = { "over", 2, 3 },
+    [DROP] = { "drop", 1, 0 },
+    [SWAP] = { "swap", 2, 2 },
+    [SUB]  = { "-",    2, 1 },
+    [ADD]  = { "+",    2, 1 },
+    [MUL]  = { "*",    2, 1 },
+    [NOP] = { "nop",     0, 0 },
+    [AND] = { "and",     2, 1 },
+    [OR]  = { "or",      2, 1 },
+    [XOR] = { "xor",     2, 1 },
+    [ZEQ] = { "0=",      1, 1 },
+    [ZLT] = { "0<",      1, 1, },
+    [NOT] = { "not",     1, 1 },
+    [NEGATE] = { "negate",  1, 1 },
+    [DIV] = { "/",       2, 1 },
+    [SHFT] = { "shift",   2, 1 },
+    [STORE] = { "!",       2, 0 },
+    [FETCH] = { "@",       1, 1 },
+    [TOR] = { ">r",      1, 0 },
+    [FROMR] = { "r>",      0, 1 },
+    [RFETCH] = { "r@",      0, 1 },
+    [EXIT] = { "exit",    0, 0 },
+    [SYS] = { "sys",     0, 0 },
+    [YIELD] = { "yield",   0, 0 },
+    [ELEM] = { "[]",      2, 1 },
+    [EXEC] = { "execute", 1, 0 },
+    [FPFETCH] = { "fp@",     0, 1 },
+    [FPSTORE] = { "fp!",     1, 0 },
+    [SPFETCH] = { "sp@",     0, 1 },
+    [SPSTORE] = { "sp!",     1, 0 },
+
+    [JMPZ+(OP0MASK+1)]  = { "jmpz",    1, 0 },
+    [JMPNZ+(OP0MASK+1)] = { "jmpnz",   1, 0 },
+    [JNEXT+(OP0MASK+1)]  = { "next",    0, 0},
+    [JMPLZ+(OP0MASK+1)] = { "jmplz",   1, 0 },
+    [JMP+(OP0MASK+1)] =  { "jmp",     0, 0 },
+    [CALL+(OP0MASK+1)] = { "call",    0, 0 },
+    [LITERAL+(OP0MASK+1)] = { "literal", 0, 1 },
+    [ARRAY+(OP0MASK+1)] = { "array",   0, 1 },
+    [ARG+(OP0MASK+1)] = { "arg",     0, 1 },
 };
 
-void static trace_begin(int op,cell_t* sp)
+void static trace_begin(int j, cell_t* sp)
 {
     int i;
-    int size = 0;
+    int size = op_name[j].before;
+    
+    printf("%s ", op_name[j].name);
 
-    switch(op >> OPSHFT) {
-    case 0:
-	printf("%s ", op_name[op & OP0MASK].name);
-	size = op_name[op & OP0MASK].before;
-	break;
-    case 1:
-	printf("%s ", jop_name[op & OP1MASK].name);
-	size = jop_name[op & OP1MASK].before;
-	break;
-    case 2:
-	printf("%s ", jop_name[op & OP2MASK].name);
-	size = jop_name[op & OP2MASK].before;
-	break;
-    case 3:
-	printf("%s ", op_name[op & OP3MASK].name);
-	size = op_name[op & OP3MASK].before;
-	break;
-    }
     printf("%d (", size);
     for (i = size-1; i >= 0; i--)
 	printf(" %d", sp[i]);
     printf(" -- ");
-    if (((op >> OPSHFT) == 0) && ((op & OP0MASK) == YIELD))
+    if (j == YIELD)
 	printf(")\n");
 }
 
-void static trace_end(int op, cell_t* sp, cell_t* sp0)
+void static trace_end(int j, cell_t* sp, cell_t* sp0)
 {
     int i;
-    int size = 0;
-    int size0 = 0;
-
-    switch(op >> OPSHFT) {
-    case 0:
-	printf("%s ", op_name[op & OP0MASK].name);
-	size = op_name[op & OP0MASK].after;
-	size0 = op_name[op & OP0MASK].before;
-	break;
-    case 1:
-	printf("%s ", jop_name[op & OP1MASK].name);
-	size = jop_name[op & OP1MASK].after;
-	size0 = jop_name[op & OP1MASK].before;	
-	break;
-    case 2:
-	printf("%s ", jop_name[op & OP2MASK].name);
-	size = jop_name[op & OP2MASK].after;
-	size0 = jop_name[op & OP2MASK].before;
-	break;
-    case 3:
-	printf("%s ", op_name[op & OP3MASK].name);
-	size = op_name[op & OP3MASK].after;
-	size0 = op_name[op & OP3MASK].before;
-	break;
-    }
+    int size = op_name[j].after;
+    int size0 = op_name[j].before;
 
     for (i = size-1; i >= 0; i--) 
 	printf("%d ", sp[i]);
     printf(")\n");
-    if (((op >> OPSHFT) != 0) || ((op & OP0MASK) != SYS)) {
+    if (j != SYS) {
 	if ((sp0 - sp) != (size - size0)) {
 	    printf("operation moved stack pointer\n");
 	    exit(1);
@@ -264,11 +220,11 @@ static const char* trace_ins(uint8_t ins)
 
 #define TRACEF(...) printf(__VA_ARGS__)
 
-#define BEGIN { cell_t* _s_SP=cSP; trace_begin(I,cSP); {
-#define XEND  } trace_end(I,cSP,_s_SP); }
-#define TEND  trace_end(I,cSP,_s_SP);
-#define END   } trace_end(I,cSP,_s_SP); NEXT; }
-#define END0  } trace_end(I,cSP,_s_SP); NEXT0; }
+#define BEGIN { cell_t* _s_SP=cSP; trace_begin(J,cSP); {
+#define XEND  } trace_end(J,cSP,_s_SP); }
+#define TEND  trace_end(J,cSP,_s_SP);
+#define END   } trace_end(J,cSP,_s_SP); NEXT; }
+#define END0  } trace_end(J,cSP,_s_SP); NEXT0; }
 
 #else
 
@@ -332,51 +288,73 @@ next1:
     default: fail(FAIL_INVALID_OPCODE);
     JCASE(JMPZ): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    if (*cSP++ == 0) cIP += A;
+	    if (*cSP++ == 0)
+		cIP = cIP + load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    if (*cSP++ == 0) cIP += A;
 	    END;
 	}
 	
     JCASE(JMPNZ): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    if (*cSP++ != 0) cIP += A;
+	    if (*cSP++ != 0)
+		cIP = cIP + load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    if (*cSP++ != 0) cIP += A;
 	    END;
 	}
 
     JCASE(JNEXT): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    if (--(cRP[-1])>0) cIP += A; else cRP--;
+	    if (--(cRP[-1])>0)
+		cIP = cIP + load_arg(I,cIP);
+	    else
+		cRP--;
+	    cIP = cIP + get_arg_len(I);	    
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    if (--(cRP[-1])>0) cIP += A; else cRP--;
 	    END;
 	}
 
     JCASE(JMPLZ): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    if (*cSP++ < 0) cIP += A;
+	    if (*cSP++ < 0)
+		cIP = cIP + load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);	    
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    if (*cSP++ < 0) cIP += A;
 	    END;
 	}
 
     JCASE(JMP): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    cIP += A;
+	    cIP = cIP + load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    cIP += A;
 	    END;
 	}
 
     JCASE(CALL): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
+	    A = load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
 	    *cRP++ = (cIP - mp->prog);
 	    cIP += A;
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    *cRP++ = (cIP - mp->prog);
+//	    cIP += A;
 	    END;
 	}
 
     JCASE(LITERAL): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
-	    *--cSP = A;
+	    *--cSP = load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    *--cSP = A;
 	    END;
 	}
 
@@ -391,9 +369,13 @@ next1:
 
     JCASE(ARG): {
 	    BEGIN;
-	    cIP = cIP + get_arg(I,cIP,&A);
+	    A = load_arg(I,cIP);
+	    cIP = cIP + get_arg_len(I);
 	    cSP--;
 	    cSP[0] = cFP[A];
+//	    cIP = cIP + get_arg(I,cIP,&A);
+//	    cSP--;
+//	    cSP[0] = cFP[A];
 	    END;
 	}
 
@@ -599,7 +581,7 @@ next1:
 	    BEGIN;
 	    uint8_t* aptr;
 	    int i, j, n;
-	    // check that top of element is a array pointer, 
+	    // check that top of element is an array pointer, 
 	    // and that index on second element is an index into
 	    // that  array, push the element onto stack
 	    i    = cSP[0];             // get index

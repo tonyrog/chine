@@ -336,7 +336,27 @@ typedef struct _chine_t
 // get argument
 // opcode1: I = 01llxxxx
 // opcode2: I = 10aaaxxx aaa is signed 3-bit argument
-// 
+//
+static CHINE_INLINE int get_arg_len(uint8_t I)
+{
+    if ((I >> OPSHFT) == OP2)
+	return 0;
+    else
+	return (1 << OP1VAL(I));
+}
+
+static CHINE_INLINE cell_t load_arg(uint8_t I, uint8_t* ptr)
+{
+    if ((I >> OPSHFT) == OP2)
+	return OP2VAL(I);
+    switch(OP1VAL(I)) {
+    case 0: return INT8(ptr);
+    case 1: return INT16(ptr);
+    case 2: return INT32(ptr);
+    default: return 0;
+    }
+}
+
 static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
 {
     if ((I >> OPSHFT) == OP2) { // extract 3 bit signed number

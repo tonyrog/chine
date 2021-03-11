@@ -17,9 +17,9 @@
 	0=       12
 	0<       13
 	not      14
-	invert   15
+	U/A      15       unassigned
 	negate   16
-	/        17
+	/        17       integer division
 	shift    18
 	!        19
 	@        20
@@ -51,7 +51,7 @@ The first opcode 0..7 can be packed
 
 ## opcode 01eejjjj
 
-This group uses the three middle bits eee as a binary exponent
+This group uses the two middle bits ee as a binary exponent
 to code number of bytes that follow the code code.
 
     ee      0    1 byte signed argument length

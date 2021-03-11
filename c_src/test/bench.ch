@@ -1,7 +1,6 @@
 %% -*- erlang -*-
 %% 
 %% BENCHMARK calculate 12! 1000000 times
-%% around 500-600ms on my mac
 %%
 {export,run}.
 
@@ -14,7 +13,7 @@
  now,
  swap, '-', 
  {call, println},
- {again,yield}    %% forever loop
+ terminate
 ].
 
 [
