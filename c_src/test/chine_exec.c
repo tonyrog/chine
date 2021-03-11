@@ -161,24 +161,26 @@ int main(int argc, char** argv)
 {
     uint8_t imask[NUM_IBYTES];   // input mask
     timeout_t tmo;
-    FILE* f;
+    FILE* f = stdin;
     int offset;
     uint8_t* symb_start;
     uint8_t* symb_end;
     uint8_t* code_start;
     uint8_t* code_end;
 
-    if ((f = fopen(argv[1], "rb")) == NULL) {
-	fprintf(stderr, "chine_exec: unable to open file [%s] %s\n",
-		argv[1], strerror(errno));
-	exit(1);
+    if (argc > 1) {
+	if ((f = fopen(argv[1], "rb")) == NULL) {
+	    fprintf(stderr, "chine_exec: unable to open file [%s] %s\n",
+		    argv[1], strerror(errno));
+	    exit(1);
+	}
     }
-
     if (fread(data, sizeof(char), sizeof(data), f) >= sizeof(data)) {
 	fprintf(stderr, "chine_exec: file [%s] too large\n", argv[1]);
 	exit(1);
     }
-    fclose(f);
+    if (f != stdin)
+	fclose(f);
 
     if ((symb_start = file_header((uint8_t*)data, &symb_end)) == NULL) {
 	fprintf(stderr, "chine_exec: file format error\n");

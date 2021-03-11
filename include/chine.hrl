@@ -8,7 +8,7 @@
 -define(OPCODE1(JOP,L),  <<1:2, (L):2, (JOP):4>>).
 %% A is a 3 bit signed integer
 -define(OPCODE2(JOP,A),  <<2:2, (A):3, (JOP):3>>).
-%% Combne opcode1 and opcode2 (in range 0..7) into one byte
+%% Combine opcode1 and opcode2 (in range 0..7) into one byte
 -define(OPCODE3(OP1,OP2), <<3:2, (OP2):3, (OP1):3>>).
 
 -define(CHINE_TRUE, -1).
@@ -69,8 +69,8 @@
 	 'sp@',
 	 'sp!'
 	}).
--define(OP(X), (#opcode.X-2)).
--define(ENUM(X), X => (#opcode.X-2)).
+-define(OP(X), ((#opcode.X)-2)).
+-define(ENUM(X), X => ((#opcode.X)-2)).
 
 
 %% Failure codes

@@ -875,17 +875,17 @@ opcode_length({literal,int3,_X}) -> 1;
 opcode_length({literal,int8,_X}) -> 2;
 opcode_length({literal,int16,_X}) -> 3;
 opcode_length({literal,int32,_X}) -> 5;
+opcode_length({literal,uint3,_X}) -> 1;
+opcode_length({literal,uint8,_X}) -> 2;
+opcode_length({literal,uint16,_X}) -> 3;
+opcode_length({literal,uint32,_X}) -> 5;
 
 %% opcode1 only no int3 encoding
 opcode_length({arg,int8,_X}) -> 2;
 opcode_length({arg,int16,_X}) -> 3;
 opcode_length({arg,int32,_X}) -> 5;
 
-%%opcode_length({literal,uint3,_X}) -> 1;
-%%opcode_length({literal,uint8,_X}) -> 2;
-%%opcode_length({literal,uint16,_X}) -> 3;
-%%opcode_length({literal,uint32,_X}) -> 5;
-%% opcode_length({caddr,uint3,_L})  -> 1;
+opcode_length({caddr,uint3,_L})  -> 1;
 opcode_length({caddr,uint8,_L})  -> 2;
 opcode_length({caddr,uint16,_L}) -> 3;
 opcode_length({caddr,uint32,_L}) -> 5;

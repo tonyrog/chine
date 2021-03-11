@@ -59,6 +59,7 @@ typedef uint32_t timeout_t;
 
 // chine test table
 //    x  = 123   -1   0
+//   !x  =   0    0   1
 //  !!x  =   1    1   0
 // -!!x  =  -1   -1   0    
 
