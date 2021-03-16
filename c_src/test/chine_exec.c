@@ -232,10 +232,30 @@ final:
 	}
     }
     // printf("TOS = %d\n", m.cSP[0]);
-    exit(0);
+    // exit(0);
 fail:
     if (m.cErr != FAIL_TERMINATE) {
-	fprintf(stderr, "chine_exec: execution error %d\n", m.cErr);
+	char* errstr = "unknown";
+	switch(m.cErr) {
+	case FAIL_INVALID_ARGUMENT:
+	    errstr = "invalid argument"; break;
+	case FAIL_INVALID_OPCODE:
+	    errstr = "invalid opcode"; break;
+	case FAIL_STACK_OVERFLOW:
+	    errstr = "stack overflow"; break;
+	case FAIL_STACK_UNDERFLOW:
+	    errstr = "stack underflow"; break;
+	case FAIL_INVALID_MEMORY_ADDRESS:
+	    errstr = "invalid address"; break;
+	case FAIL_DIV_ZERO:
+	    errstr = "division by zero"; break;
+	case FAIL_TIMER_OVERFLOW:
+	    errstr = "timer overflow"; break;
+	default:
+	    fprintf(stderr, "chine_exec: execution error: code=%d\n", m.cErr);
+	    exit(1);
+	}
+	fprintf(stderr, "chine_exec: execution error: %s\n", errstr);
 	exit(1);
     }
     exit(0);    

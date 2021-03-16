@@ -214,7 +214,7 @@ dis_opcodes(<<3:2, OP2:3, OP1:3, Content/binary>>, Addr, SymTab, Code) ->
 	      #opcode.'+' -> '+';
 	      #opcode.'*' -> '*'
 	  end,
-    dis_opcodes(Content, Addr+1, SymTab, [OpB,OpA|Code]).
+    dis_opcodes(Content, Addr+1, SymTab, [{OpA,OpB}|Code]).
 
 unsigned(uint3, V) when V < 0 -> V+(1 bsl 3);
 unsigned(uint8, V) when V < 0 -> V+(1 bsl 8);
