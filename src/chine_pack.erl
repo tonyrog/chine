@@ -135,7 +135,7 @@ hex_encode_(<<>>) ->
     [].
 
 exe_type(File) ->
-    case read_header(File, 64) of
+    case read_header(File, 256) of
 	{ok, Header} ->
 	    case elf(Header) of
 		{true, TypeMap} ->
@@ -222,31 +222,109 @@ macho(Header) ->
 		endian => E }}
     end.
 
+-define(SHORT(X),  X:16/signed-little).
+-define(USHORT(X), X:16/unsigned-little).
+-define(DWORD(X),  X:32/unsigned-little).
+-define(ULONG(X),  X:32/unsigned-little).
+-define(LONG(X),   X:32/signed-little).
+
+-define(USHORT_(N), _:N/unit:16).
+-define(ULONG_(N), _:N/unit:32).
+
+%% e_magic
+-define(IMAGE_DOS_SIGNATURE,        16#5A4D).      %% MZ
+-define(IMAGE_OS2_SIGNATURE,        16#454E).      %% NE
+-define(IMAGE_OS2_SIGNATURE_LE,     16#454C).      %% LE
+-define(IMAGE_NT_SIGNATURE,         16#00004550).  %% PE00
+
+-define(SIZE_OF_NT_SIGNATURE, 4). %% sizeof (DWORD) - 32 bit
+
+-define(IMAGE_DOS_HEADER,
+	?USHORT(E_magic),         %% Magic number
+	?USHORT(E_cblp),          %% Bytes on last page of file
+	?USHORT(E_cp),            %% Pages in file
+	?USHORT(E_crlc),          %% Relocations
+	?USHORT(E_cparhdr),       %% Size of header in paragraphs
+	?USHORT(E_minalloc),      %% Minimum extra paragraphs needed
+	?USHORT(E_maxalloc),      %% Maximum extra paragraphs needed
+	?USHORT(E_ss),            %% Initial (relative) SS value
+	?USHORT(E_sp),            %% Initial SP value
+	?USHORT(E_csum),          %% Checksum
+	?USHORT(E_ip),            %% Initial IP value
+	?USHORT(E_cs),            %% Initial (relative) CS value
+	?USHORT(E_lfarlc),        %% File address of relocation table
+	?USHORT(E_ovno),          %% Overlay number
+	?USHORT_(4),              %% E_res[4] Reserved words
+	?USHORT(E_oemid),         %% OEM identifier (for e_oeminfo)
+	?USHORT(E_oeminfo),       %% OEM information; e_oemid specific
+	?USHORT_(10),             %% e_res2[10] Reserved words
+	?LONG(E_lfanew)           %% File address of new exe header
+	).
+
+-define(IMAGE_FILE_HEADER, 
+	?USHORT(Machine),
+	?USHORT(NumberOfSections),
+	?ULONG(TimeDateStamp),
+	?ULONG(PointerToSymbolTable),
+	?ULONG(NumberOfSymbols),
+	?USHORT(SizeOfOptionalHeader),
+	?USHORT(Characteristics)
+	).
+
 %% Windows object code format
 coff(Header) ->
     case Header of
-	<<_:16#3c/binary, "PE\0\0", Machine:16/little, _/binary>> ->
-	    {M,W,E} =
-		case Machine of
-		    16#14c  -> {"i386",       32, little};
-		    16#8664 -> {"x86_64",     64, little};
-		    16#1c0  -> {"arm",        32, little};
-		    16#aa64 -> {"arm64",      64, little};
-		    16#1c2  -> {"thumb",      16,little};
-		    16#1c4  -> {"thumb2",     16,little};
-		    16#5032 -> {"riscv32",    32, little};
-		    16#5064 -> {"riscv64",    64, little};
-		    16#50128-> {"riscv128",   128, little};
-		    _ -> {"", 0, unknown}
-		end,
-	    if M =:= "" ->
-		    false;
-	       true ->
-		    #{ operating_system => "Windows",
-		       machine => M,
+	<<?IMAGE_DOS_HEADER,_/binary>> ->
+	    io:format("e_lfanew: ~w\n", [E_lfanew]),
+	    case Header of
+		<<_:E_lfanew/binary,
+		  ?USHORT(?IMAGE_OS2_SIGNATURE),_/binary>> ->
+		    {true, 
+		     #{ operating_system => "OS/2",
+			machine => "x86",
+			type => exe,
+			word_size => 16,
+			endian => big }};
+		<<_:E_lfanew/binary,
+		  ?USHORT(?IMAGE_OS2_SIGNATURE_LE),_/binary>> ->
+		    {true,
+		     #{ operating_system => "OS/2",
+			machine => "x86",
+			type => exe,
+			word_size => 16,
+			endian => little }};
+		<<_:E_lfanew/binary, ?DWORD(?IMAGE_NT_SIGNATURE),
+		  ?IMAGE_FILE_HEADER, _/binary>> ->
+		    {M,W,E} =
+			case Machine of
+			    16#14c  -> {"i386",       32, little};
+			    16#8664 -> {"x86_64",     64, little};
+			    16#1c0  -> {"arm",        32, little};
+			    16#aa64 -> {"arm64",      64, little};
+			    16#1c2  -> {"thumb",      16,little};
+			    16#1c4  -> {"thumb2",     16,little};
+			    16#5032 -> {"riscv32",    32, little};
+			    16#5064 -> {"riscv64",    64, little};
+			    16#50128-> {"riscv128",   128, little};
+			    _ -> {"", 0, unknown}
+			end,
+		    if M =:= "" ->
+			    false;
+		       true ->
+			    {true,
+			     #{ operating_system => "Windows",
+				machine => M,
+				type => exe,
+				word_size => W,
+				endian => E }}
+		    end;
+		_ ->
+		    {true,
+		     #{ operating_system => "Dos",
+		       machine => "x86",
 		       type => exe,
-		       word_size => W,
-		       endian => E }
+		       word_size => 16,
+		       endian => little }}
 	    end;
 	_ ->
 	    false
