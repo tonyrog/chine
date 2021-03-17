@@ -1,0 +1,10 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%% @author Tony Rogvall <tony@rogvall.se>
+%%% @copyright (C) 2021, Tony Rogvall
+%%% @doc
+%%%    pack chine program as script/executable
+%%% @end
+
+main(Args) ->
+    chine_pack:start(Args).

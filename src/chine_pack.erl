@@ -7,22 +7,48 @@
 
 -module(chine_pack).
 
--export([main/1, exe_type/1]).
+-export([start/1, exe_type/1]).
+-export([pack/2]).
 
 -define(HERE, "50F645CD7C7209972B48C3220959677A").
 
 %%
-%% Usage:  chine_pack code.x
+%% Usage:  chine_pack code.x code
 %%
 
-main([ChineFile]) ->
+start([ChineFile]) ->
+    pack(ChineFile, standard_io),
+    halt(0);
+start([ChineFile,OutFile]) ->
+    pack(ChineFile,OutFile),
+    halt(0);
+start(_) ->
+    io:format("usage: chine_pack file.x [command.sh]\n").
+
+pack(ChineFile,standard_io) ->
+    pack_(ChineFile,standard_io);
+pack(ChineFile,OutFile) ->
+    case file:open(OutFile, [write]) of
+	{ok,Fd} ->
+	    try pack_(ChineFile,Fd) of
+		Res -> Res
+	    after
+		file:close(Fd)
+	    end;
+	{error,Reason} ->
+	    io:format("file error: unable to open output file ~p : ~p\n",
+		      [OutFile, Reason]),
+	    halt(1)
+    end.
+	    
+pack_(ChineFile,Fd) ->
     Dir = code:priv_dir(chine),
     {ok,DirList} = file:list_dir(Dir),
     ExeList = 
 	lists:foldl(
 	  fun(File="chine_exec."++_, Acc) ->
 		  ExeFile = filename:join(Dir, File),
-		  io:format("Load ~s\n", [ExeFile]),
+		  io:format("Added ~s\n", [ExeFile]),
 		  case read_exe(ExeFile) of
 		      {ok,Exe} ->
 			  [Exe|Acc];
@@ -32,7 +58,6 @@ main([ChineFile]) ->
 	     (_, Acc) -> Acc %% ignore other files
 	  end, [], DirList),
     ZeroSize = lists:max([byte_size(Bin) || {_TypeMap,Bin} <- ExeList]),
-    {ok,Fd} = file:open("output.sh", [write]),
     io:put_chars(Fd,
 		 ["#!/bin/bash\n",
 		  "SM=`uname -s`-`uname -m`\n",
@@ -51,7 +76,7 @@ main([ChineFile]) ->
     {ok,Chine} = file:read_file(ChineFile),
     Chine1 = zeropad(Chine, 38),
     ChineData = format_hex(Chine1),  %% store chine code as hex data
-    io:format("chine code size = ~w padded to ~w\n", 
+    io:format("Chine code size = ~w padded to ~w\n", 
 	      [byte_size(Chine), byte_size(Chine1)]),
     %% 8 hex characters for as offset to program start
     Tail = erlang:iolist_to_binary(
@@ -63,8 +88,7 @@ main([ChineFile]) ->
     io:put_chars(Fd,
 		 ["else\n",
 		  "true <<", ?HERE, "\n",
-		  Tail, TailLen, "\n"]),
-    file:close(Fd).
+		  Tail, TailLen, "\n"]).
 
 zeropad(Bin, M) ->
     Size = byte_size(Bin),
@@ -91,8 +115,8 @@ format_exe(TypeMap, Bin) ->
      "exec $0 $0\n"
     ].
 
-format_base64(Bin) ->
-    make_rows(base64:encode(Bin), 76).
+%% format_base64(Bin) ->
+%%    make_rows(base64:encode(Bin), 76).
 
 format_hex(Bin) ->
     make_rows(hex_encode(Bin), 76).
@@ -273,7 +297,7 @@ elf(Header) ->
 		    case Machine of
 			?EM_386    -> "i386";
 			?EM_X86_64 -> "x86_64";
-			?EM_ARM -> "arm";
+			?EM_ARM -> "armv7l";  %% fixme subtype!
 			?EM_RISCV -> "riscv";
 			_ -> Machine
 		    end,
