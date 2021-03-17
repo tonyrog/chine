@@ -225,7 +225,7 @@ macho(Header) ->
 %% Windows object code format
 coff(Header) ->
     case Header of
-	<<_:16#3c, "PE\0\0", Machine:16/little, _/binary>> ->
+	<<_:16#3c/binary, "PE\0\0", Machine:16/little, _/binary>> ->
 	    {M,W,E} =
 		case Machine of
 		    16#14c  -> {"i386",       32, little};
