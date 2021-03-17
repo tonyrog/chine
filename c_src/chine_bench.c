@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <unistd.h>
-#include "../../include/chine.h"
+#include "../include/chine.h"
 
 chine_t m;
 

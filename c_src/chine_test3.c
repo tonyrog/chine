@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <memory.h>
 #include <unistd.h>
-#include "../../include/chine.h"
+#include "../include/chine.h"
 
 chine_t m1;
 chine_t m2;

@@ -12,7 +12,7 @@
 #include <fcntl.h>
 #include <sys/time.h>
 
-#include "../../include/chine.h"
+#include "chine.h"
 
 #ifdef TRACE
 #define TRACEF(...) printf(__VA_ARGS__)
@@ -607,6 +607,25 @@ int chine_unix_sys(chine_t* mp,
 	}
 	else {
 	    *npop = 1;
+	    *value = CHINE_TRUE;
+	}
+	return 1;
+    }
+
+    case SYS_FILE_SEEK: {
+	int fd       = revarg[2];
+	off_t offset = revarg[1];
+	int whence   = revarg[0];
+	TRACEF("file_seek(%d,%d,%d)", fd, offset, whence);
+	offset = lseek(fd,offset,whence);
+	if ((int)offset == -1) {
+	    *npop = 2;
+	    revarg[2] = errno;
+	    *value = CHINE_FALSE;
+	}
+	else {
+	    *npop = 2;
+	    revarg[2] = offset;
 	    *value = CHINE_TRUE;
 	}
 	return 1;

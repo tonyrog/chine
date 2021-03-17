@@ -311,6 +311,7 @@ int chine_arduino_sys(chine_t* mp,
     // SYS_FILE_WRITE
     // SYS_FILE_READ
     // SYS_FILE_CLOSE
+    // SYS_FILE_SEEK	
 	
     default:
 	*npop = 0;

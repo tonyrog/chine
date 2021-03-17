@@ -5,7 +5,7 @@
 #include <memory.h>
 #include <sys/time.h>
 
-#include "../../include/chine.h"
+#include "../include/chine.h"
 
 extern int32_t chine_unix_sys(chine_t* mp,
 			      int32_t sysop, int32_t* revarg,

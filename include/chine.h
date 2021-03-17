@@ -305,6 +305,7 @@ typedef enum {
     SYS_FILE_WRITE,     // ( n fd buf -- 1 n | 0 err )
     SYS_FILE_READ,      // ( n fd buf -- 1 n | 0 err )
     SYS_FILE_CLOSE,     // ( fd -- 1 | 0 err )
+    SYS_FILE_SEEK,      // ( fd offs whence -- 1 offs | 0 err )
 } syscall_t;
 
 // LED interface set_led / clr_led

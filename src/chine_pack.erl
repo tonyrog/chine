@@ -7,46 +7,110 @@
 
 -module(chine_pack).
 
--export([main/1, exec_type/1]).
+-export([main/1, exe_type/1]).
+
+-define(HERE, "50F645CD7C7209972B48C3220959677A").
 
 %%
 %% Usage:  chine_pack code.x
 %%
 
-main(_Args) ->
+main([ChineFile]) ->
     Dir = code:priv_dir(chine),
-    {ok,List} = file:list_dir(Dir),
+    {ok,DirList} = file:list_dir(Dir),
+    ExeList = 
+	lists:foldl(
+	  fun(File="chine_exec."++_, Acc) ->
+		  ExeFile = filename:join(Dir, File),
+		  io:format("Load ~s\n", [ExeFile]),
+		  case read_exe(ExeFile) of
+		      {ok,Exe} ->
+			  [Exe|Acc];
+		      Error = {error,_} ->
+			  io:format("unable to read ~s: ~p\n", [ExeFile,Error])
+		  end;
+	     (_, Acc) -> Acc %% ignore other files
+	  end, [], DirList),
+    ZeroSize = lists:max([byte_size(Bin) || {_TypeMap,Bin} <- ExeList]),
+    {ok,Fd} = file:open("output.sh", [write]),
+    io:put_chars(Fd,
+		 ["#!/bin/bash\n",
+		  "SM=`uname -s`-`uname -m`\n",
+		  "chmod -f +wx $0\n",
+		  "if [ -n \"\" ]; then\n",
+		  "true <<", ?HERE, "\n",
+		  lists:duplicate(ZeroSize, $0),"\n",
+		  ?HERE, "\n"]),
+    %% Output executables
     lists:foreach(
-      fun(File="chine_exec."++_) ->
-	      case emit_exec(filename:join(Dir,File)) of
-		  {ok, Data} ->
-		      io:put_chars(Data);
-		  Error = {error,_} ->
-		      io:format("unable to process ~s: ~p\n", [File,Error])
-	      end;
-	 (_) -> %% ignore other files
-	      ok
-      end, List).
+      fun({TypeMap,Bin}) ->
+	      Data = format_exe(TypeMap,Bin),
+	      io:put_chars(Fd, Data)
+      end, ExeList),
+    %% Output chine code
+    {ok,Chine} = file:read_file(ChineFile),
+    Chine1 = zeropad(Chine, 38),
+    ChineData = format_hex(Chine1),  %% store chine code as hex data
+    io:format("chine code size = ~w padded to ~w\n", 
+	      [byte_size(Chine), byte_size(Chine1)]),
+    %% 8 hex characters for as offset to program start
+    Tail = erlang:iolist_to_binary(
+	     [ChineData,
+	      ?HERE,"\n",
+	      "fi\n",
+	      ": "]),
+    TailLen = tl(integer_to_list(16#100000000+byte_size(Tail)+9,16)),
+    io:put_chars(Fd,
+		 ["else\n",
+		  "true <<", ?HERE, "\n",
+		  Tail, TailLen, "\n"]),
+    file:close(Fd).
 
-emit_exec(File) ->
-    case exec_type(File) of
-	{ok, TypeMap} ->
+zeropad(Bin, M) ->
+    Size = byte_size(Bin),
+    Pad  = (M - (Size rem M)) rem M,
+    <<Bin/binary, 0:Pad/unit:8>>.
+
+read_exe(File) ->
+    case exe_type(File) of
+	{ok, TypeMap} ->    
 	    {ok,Bin} = file:read_file(File),
-	    %% fixme: compress
-	    Data = make_rows(base64:encode(Bin), 76),
-	    UName = make_uname(TypeMap),
-	    {ok,
-	     [["elif [ \"$SM\" = \"",UName,"\" ]; then\n"],
-	      "(base64 -d | dd of=$0 conv=notrunc oflag=seek_bytes seek=0 2>/dev/null) <<50F645CD7C7209972B48C3220959677A\n",
-	      Data,
-	      "50F645CD7C7209972B48C3220959677A\n"
-	      "exec $0\n"
-	     ]};
+	    {ok,{TypeMap,Bin}};
 	Error ->
 	    Error
     end.
 
-exec_type(File) ->
+format_exe(TypeMap, Bin) ->
+    Data = format_gzip_base64(Bin),
+    UName = make_uname(TypeMap),
+    DD = "dd of=$0 conv=notrunc oflag=seek_bytes seek=0 2>/dev/null",
+    [["elif [ \"$SM\" = \"",UName,"\" ]; then\n"],
+     "(base64 -d | gunzip | ", DD, ") <<", ?HERE, "\n",
+     Data,
+     ?HERE, "\n",
+     "exec $0 $0\n"
+    ].
+
+format_base64(Bin) ->
+    make_rows(base64:encode(Bin), 76).
+
+format_hex(Bin) ->
+    make_rows(hex_encode(Bin), 76).
+
+format_gzip_base64(Bin) ->
+    Bin1 = zlib:gzip(Bin),
+    make_rows(base64:encode(Bin1), 76).
+
+hex_encode(Binary) ->
+    erlang:iolist_to_binary(hex_encode_(Binary)).
+
+hex_encode_(<<H:4,L:4,Bin/binary>>) ->
+    Hex = {$0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$A,$B,$C,$D,$E,$F},
+    [element(H+1,Hex),element(L+1,Hex)|hex_encode_(Bin)];
+hex_encode_(<<>>) ->
+    [].
+
+exe_type(File) ->
     case read_header(File, 64) of
 	{ok, Header} ->
 	    case elf(Header) of
