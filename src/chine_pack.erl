@@ -61,21 +61,32 @@ pack_(ChineFile,Fd) ->
 		  end;
 	     (_, Acc) -> Acc %% ignore other files
 	  end, [], DirList),
+    %% Darwin 17 do not have uname -o use uname -s instead
+    %% Emit machine detection
+    io:put_chars(Fd,
+		 ["#!/bin/bash", ?NL,
+		  "KERNEL=`uname -s`", ?NL,
+		  "MACHINE=`uname -m`", ?NL,
+		  "if [ \"$KERNEL\" = \"Darwin\" ]; then", ?NL,
+		  "OPERATING_SYSTEM=$KERNEL",?NL,
+		  "else",?NL,
+		  "OPERATING_SYSTEM=`uname -o`",?NL,
+		  "fi",?NL,
+		  "OM=\"$OPERATING_SYSTEM-$MACHINE\"",?NL,
+		  "chmod -f +wx $0",?NL
+		 ]),
     ZeroSize = lists:max([byte_size(Bin) || {_TypeMap,Bin} <- ExeList]),
     LineBytes = ?LINE_LENGTH + length(?NL),
     NZBytes = ((ZeroSize + LineBytes - 1) div LineBytes)*?LINE_LENGTH,
     Zs = erlang:iolist_to_binary(lists:duplicate(NZBytes,$0)),
     ZData = make_rows(Zs, ?LINE_LENGTH),
-    %% io:format("ZeroSize = ~w\n", [ZeroSize]),
-    %% io:format("iolist_size(ZData) = ~w\n", [iolist_size(ZData)]),
+    %% Outout Zero Area
     io:put_chars(Fd,
-		 ["#!/bin/bash", ?NL,
-		  "SM=`uname -s`-`uname -m`",?NL,
-		  "chmod -f +wx $0",?NL,
-		  "if [ -n \"\" ]; then", ?NL,
+		 ["if [ -n \"\" ]; then", ?NL,
 		  "true <<", ?HERE, ?NL,
 		  ZData,
-		  ?HERE, ?NL]),
+		  ?HERE, ?NL
+		 ]),
     %% Output executables
     lists:foreach(
       fun({TypeMap,Bin}) ->
@@ -121,7 +132,7 @@ format_exe(TypeMap, Bin) ->
     DD = "dd of=$0 conv=notrunc seek=0 2>/dev/null",
     Base64 = "base64 --decode",
     UnZip = "gunzip",
-    [["elif [ \"$SM\" = \"",UName,"\" ]; then", ?NL],
+    [["elif [ \"$OM\" = \"",UName,"\" ]; then", ?NL],
      "( ", Base64, " | ", UnZip, " | ", DD, ") <<", ?HERE, ?NL,
      Data,
      ?HERE, ?NL,
@@ -177,8 +188,8 @@ make_rows(Data, LineLength) ->
 	    [Line, ?NL]
     end.
 
-make_uname(#{ operating_system := S, machine := M }) ->
-    S ++ "-" ++ M.
+make_uname(#{ operating_system := O, machine := M }) ->
+    O ++ "-" ++ M.
 
 -define(MH_MAGIC,    16#feedface). %% the mach magic number 
 -define(MH_CIGAM,    16#cefaedfe). %% NXSwapInt(MH_MAGIC) 
@@ -323,7 +334,9 @@ coff(Header) ->
 			    false;
 		       true ->
 			    {true,
-			     #{ operating_system => "Windows",
+			     #{ %% operating_system => "Windows",
+				%% FIXME
+				operating_system => "Cygwin",
 				machine => M,
 				type => exe,
 				word_size => W,
@@ -381,7 +394,7 @@ elf(Header) ->
 		    <<Type:16/big,Machine:16/big>> = TypeMachine
 	    end,
 	    {true,
-	     #{ operating_system => "Linux",
+	     #{ operating_system => "GNU/Linux",
 		machine =>
 		    case Machine of
 			?EM_386    -> "i386";
