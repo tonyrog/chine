@@ -48,7 +48,7 @@ pack_(ChineFile,Fd) ->
 	lists:foldl(
 	  fun(File="chine_exec."++_, Acc) ->
 		  ExeFile = filename:join(Dir, File),
-		  io:format("Added ~s\n", [ExeFile]),
+		  %% io:format("Added ~s\n", [ExeFile]),
 		  case read_exe(ExeFile) of
 		      {ok,Exe} ->
 			  [Exe|Acc];
@@ -76,8 +76,8 @@ pack_(ChineFile,Fd) ->
     {ok,Chine} = file:read_file(ChineFile),
     Chine1 = zeropad(Chine, 38),
     ChineData = format_hex(Chine1),  %% store chine code as hex data
-    io:format("Chine code size = ~w padded to ~w\n", 
-	      [byte_size(Chine), byte_size(Chine1)]),
+    %% io:format("Chine code size = ~w padded to ~w\n", 
+    %%   [byte_size(Chine), byte_size(Chine1)]),
     %% 8 hex characters for as offset to program start
     Tail = erlang:iolist_to_binary(
 	     [ChineData,
@@ -191,18 +191,19 @@ macho(Header) ->
     {W,E,C} = case Header of
 		  <<?MH_MAGIC:32/big, CPU:32, _/binary>> ->
 		      {32,big,CPU};
-		  <<?MH_CIGAM:32/big,CPU:32,_/binary>> ->
+		  <<?MH_CIGAM:32/big, CPU:32/little,_/binary>> ->
 		      {32,little,CPU};
-		  <<?MH_MAGIC_64:32/big,CPU:32,_/binary>> ->
+		  <<?MH_MAGIC_64:32/big, CPU:32,_/binary>> ->
 		      {64,big,CPU};
-		  <<?MH_CIGAM_64:32/big,CPU:32,_/binary>> -> 
+		  <<?MH_CIGAM_64:32/big,CPU:32/little,_/binary>> -> 
 		      {64,little,CPU};
 		  <<?FAT_MAGIC:32/big,CPU:32,_/binary>> ->
 		      {fat,big,CPU};
-		  <<?FAT_CIGAM:32/big,CPU:32,_/binary>> ->
+		  <<?FAT_CIGAM:32/big,CPU:32/little,_/binary>> ->
 		      {fat,little,CPU};
 		  _ -> {0, unknown,0}
 	      end,
+    %% io:format("macho w=~w, e=~w, c=~w\n", [W,E,C]),
     M = case C of
 	    ?CPU_TYPE_I386   -> "i386";
 	    ?CPU_TYPE_X86_64  -> "x86_64";
@@ -274,8 +275,8 @@ macho(Header) ->
 %% Windows object code format
 coff(Header) ->
     case Header of
-	<<?IMAGE_DOS_HEADER,_/binary>> ->
-	    io:format("e_lfanew: ~w\n", [E_lfanew]),
+	<<?IMAGE_DOS_HEADER,_/binary>> when E_magic =:= ?IMAGE_DOS_SIGNATURE ->
+	    %% io:format("e_lfanew: ~w\n", [E_lfanew]),
 	    case Header of
 		<<_:E_lfanew/binary,
 		  ?USHORT(?IMAGE_OS2_SIGNATURE),_/binary>> ->
