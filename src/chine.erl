@@ -25,119 +25,86 @@
 
 -define(PROG, "chine").
 
+
 options() ->
-    [ {format,$f,"format", {atom,binary}, "output file format"},
-      {debug,$d,"debug", undefined, "show debug information"},
-      {execute,$x,"execute", undefined, "execute compile code"},
-      {output,$o,"output-file", string, "output file name"},
-      {version,$v,"version", undefined, "application version"},
-      {help,$h,"help", undefined, "this help"}
+    [
+     #{ 
+       key => format,
+       long => "format",
+       short => "f",
+       type => atom,  %% binary or c
+       default => binary,
+       description => "Output file format"
+      },
+
+      #{ key => debug,
+	 long => "debug",
+	 short => "d",
+	 type => boolean,
+	 default => false,
+	 description => "Show debug information"},
+
+     #{ key => execute,
+	long => "execute",
+	short => "x",
+	type => boolean,
+	default => false,
+	description => "Execute compile code"
+      },
+
+     #{ key => output,
+	long => "output-file",
+	short => "o",
+	type => string,
+	default => "",
+	description => "Output file name"
+      },
+
+     #{ key => version,
+	long => "version",
+	short => "v",
+	type => boolean,
+	default => false,
+	description => "Display application version"
+      },
+
+     #{ key => help,
+	long => "help",
+	short => "h",
+	type => boolean,
+	default => false,
+	description =>  "This help"
+      }
     ].
+
 
 start() ->
     start([]).
 
 start(Args) ->
     application:load(chine),
-    case do_options(Args) of
+    case chine_opt:parse(options(),Args) of
 	{ok,{Opts,Files}} ->
-	    case getopt(version, Opts) of
+	    case chine_opt:value(version, Opts) of
 		true ->
 		    do_version(),
 		    halt(0);
 		false ->
 		    ok
 	    end,
-	    case getopt(help,Opts) of
+	    case chine_opt:value(help,Opts) of
 		true ->
-		    do_usage(),
+		    chine_opt:usage(options(),?PROG),
 		    halt(0);
 		false ->
 		    do_input(Files, Opts)
 	    end;
 	{error,Error} ->
 	    io:format(standard_error, "~s\n",
-		      [getopt:format_error(options(),Error)]),
-	    getopt:usage(options(), "chine"),
+		      [chine_opt:format_error(options(),?PROG,Error)]),
+	    chine_opt:usage(options(), ?PROG),
 	    halt(1)
     end.
-
-getopt(Key, Opts) ->
-    maps:get(Key, Opts).
-
-do_options(Args) ->
-    do_options(Args, 
-	       #{ format => binary,
-		  debug  => false,
-		  execute => false,
-		  output => "",
-		  version => false,
-		  help => false,
-		  opt_files => [] }).
-
-do_options(["-f",Format | Args], Opts) ->
-    do_options(Args, Opts#{ format => list_to_atom(Format) });
-do_options(["-f"++Format | Args], Opts) ->
-    do_options(Args, Opts#{ format => list_to_atom(Format) });
-do_options(["--format="++Format | Args], Opts) ->
-    do_options(Args, Opts#{ format => list_to_atom(Format) });
-do_options(["--format",Format | Args], Opts) ->
-    do_options(Args, Opts#{ format => list_to_atom(Format) });
-do_options(["-d" | Args], Opts) ->
-    do_options(Args, Opts#{ debug => true });
-do_options(["--debug" | Args], Opts) ->
-    do_options(Args, Opts#{ debug => true });
-do_options(["--debug=1" | Args], Opts) ->
-    do_options(Args, Opts#{ debug => true });
-do_options(["--debug=0" | Args], Opts) ->
-    do_options(Args, Opts#{ debug => false });
-
-do_options(["-x" | Args], Opts) ->
-    do_options(Args, Opts#{ execute => true });
-do_options(["--execute" | Args], Opts) ->
-    do_options(Args, Opts#{ execute => true });
-do_options(["--execute=1" | Args], Opts) ->
-    do_options(Args, Opts#{ execute => true });
-do_options(["--execute=0" | Args], Opts) ->
-    do_options(Args, Opts#{ execute => true });
-
-do_options(["-o"++File | Args], Opts) when File =/= [] ->
-    do_options(Args, Opts#{ output => File });
-do_options(["-o",File | Args], Opts)  ->
-    do_options(Args, Opts#{ output => File });
-do_options(["--output-file=",File | Args], Opts)  ->
-    do_options(Args, Opts#{ output => File });
-do_options(["--output-file="++File | Args], Opts)  ->
-    do_options(Args, Opts#{ output => File });
-
-do_options(["-v" | Args], Opts)  ->
-    do_options(Args, Opts#{ version => true });
-do_options(["--version" | Args], Opts)  ->
-    do_options(Args, Opts#{ version => true });
-do_options(["--version=1" | Args], Opts)  ->
-    do_options(Args, Opts#{ version => true });
-do_options(["--version=0" | Args], Opts)  ->
-    do_options(Args, Opts#{ version => true });
-
-do_options(["-h" | Args], Opts) ->
-    do_options(Args, Opts#{ help => true });
-do_options(["--help" | Args], Opts) ->
-    do_options(Args, Opts#{ help => true });
-do_options(["--help=1" | Args], Opts) ->
-    do_options(Args, Opts#{ help => true });
-do_options(["--help=0" | Args], Opts) ->
-    do_options(Args, Opts#{ help => true });
-
-do_options([Opt="-"++_ | _Args], _Opts) ->
-    io:format("~s:error: unknown option ~s\n", [?PROG, Opt]),
-    do_usage(),
-    halt(1);
-
-do_options([File|Args], Opts=#{ opt_files := Files }) ->
-    do_options(Args, Opts#{ opt_files => [File|Files]});
-
-do_options([], Opts=#{ opt_files := Files }) ->
-    {ok,{maps:remove(opt_files,Opts), lists:reverse(Files)}}.
 
 do_version() ->
     case application:get_key(?MODULE, vsn) of
@@ -146,17 +113,6 @@ do_version() ->
 	_ ->
 	    io:format("no version available\n", [])
     end.
-
-do_usage() ->
-    io:format(
-"Usage: chine [-f [<format>]] [-d] [-x] [-o <output>] [-v] [-h]\n"
-"  -f, --format       output file format [default: binary]\n"
-"  -d, --debug        show debug information\n"
-"  -x, --execute      execute compile code\n"
-"  -o, --output-file  output file name\n"
-"  -v, --version      application version\n"
-"  -h, --help         this help\n"
-     ).
 
 do_input([File], Opts) ->
     case file:consult(File) of
@@ -185,7 +141,7 @@ do_input([], _Opts) ->
 
 
 do_emit({Bin,Symbols,Labels}, Opts) ->
-    Format = getopt(format,Opts),
+    Format = chine_opt:value(format,Opts),
     SymTab = symbol_table(Symbols,Labels),
     %% io:format("SymTab = ~p\n", [SymTab]),
     Output = 
@@ -212,14 +168,14 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 		 io_lib:format("unsigned char prog[] = {\n  ~s };\n",
 			       [cformat(Bin,1)])]
 	end,
-    case getopt(output, Opts) of
+    case chine_opt:value(output, Opts) of
 	"" ->
 	    file:write(user,Output),
 	    halt(0);
 	File ->
 	    case file:write_file(File, Output) of
 		ok ->
-		    case getopt(execute, Opts) of
+		    case chine_opt:value(execute, Opts) of
 			true ->
 			    Exec = filename:join([code:lib_dir(chine),
 						  "bin","chine_exec"]),
@@ -302,7 +258,7 @@ asm_list(Code,Opts) ->
     {Code6,Symbols,Labels}.
 
 debugf(Opts,Fmt,As) ->
-    case getopt(debug, Opts) of
+    case chine_opt:value(debug, Opts) of
 	true ->
 	    io:format(standard_error, Fmt, As);
 	false ->

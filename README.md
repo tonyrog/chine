@@ -20,10 +20,9 @@ of architectures.
 | and       | ( a b -- [ a&b ] )
 | or        | ( a b -- [ a|b ] )
 | xor       | ( a b -- [ a^b ] )
-| 0=        | ( a -- [ a==0 ] )
-| 0<        | ( a -- [ a<0 ] )
-| not       | ( a -- [ !a ] )
-| invert    | ( a -- [ ~a ] )  |
+| 0=        | ( a -- [ a==0 ] ) | true = -1
+| 0<        | ( a -- [ a<0 ] )  | true = -1
+| not       | ( a -- [ ~a ] )
 | negate    | ( a -- [ -a ] ) |
 | /         | ( a b -- [ a/b ] ) |
 | shift     | ( a n -- [ (uint)a << n OR (int)a >> -n ] ) |
@@ -35,14 +34,12 @@ of architectures.
 | sys u:8   |    ( x1 .. xn -- v f ) |
 | exit      | ;  ( -- ) R: ( addr -- )  |
 | yield     |    ( -- )  |
-| []        | ( caddr i -- n )
-| execute   | ( caddr -- )
-
-| fp@       | ( -- fp )    | ( fetch frame pointer )
-| fp!       | ( fp -- )    | ( set frame pointer )
-| sp@       | ( -- sp )    | ( fetch stack pointer )
-| sp!       | ( sp -- )    | ( set stack pointer )
-
+| []        | ( caddr i -- n ) | data access via index
+| execute   | ( caddr -- ) | 
+| fp@       | ( -- fp )    | fetch frame pointer
+| fp!       | ( fp -- )    | set frame pointer
+| sp@       | ( -- sp )    | fetch stack pointer
+| sp!       | ( sp -- )    | set stack pointer
 
 ## INSTRUCTIONS jop
 

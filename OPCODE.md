@@ -38,7 +38,7 @@
 
 ## opcode 11xxxyyy
 
-The first opcode 0..7 can be packed
+Two of the first 0..7 opcodes can be packed into one byte.
 
     dup      0
 	rot      1
