@@ -124,7 +124,8 @@
 	 sys_file_open,
 	 sys_file_write,
 	 sys_file_read,
-	 sys_file_close
+	 sys_file_close,
+	 sys_file_seek
 	}).
 -define(SYS(N), (#sys.X-2)).
 -define(SENUM(X), X => (#sys.X-2)).

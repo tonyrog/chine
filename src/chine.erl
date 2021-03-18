@@ -25,7 +25,6 @@
 
 -define(PROG, "chine").
 
-
 options() ->
     [
      #{ 
@@ -76,7 +75,6 @@ options() ->
 	description =>  "This help"
       }
     ].
-
 
 start() ->
     start([]).
@@ -138,7 +136,6 @@ do_input([File], Opts) ->
 do_input([], _Opts) ->
     io:format("~s:error: missing input file\n", [?PROG]),
     halt(1).
-
 
 do_emit({Bin,Symbols,Labels}, Opts) ->
     Format = chine_opt:value(format,Opts),
@@ -362,7 +359,8 @@ syscalls() ->
       ?SENUM(sys_file_open),
       ?SENUM(sys_file_write),
       ?SENUM(sys_file_read),
-      ?SENUM(sys_file_close)
+      ?SENUM(sys_file_close),
+      ?SENUM(sys_file_seek)
      }.
 
 %% not real opcodes, they are expanded like macros
@@ -464,7 +462,8 @@ synthetic_opcodes() ->
       file_open       => [{sys,sys_file_open}],
       file_write      => [{sys,sys_file_write}],
       file_read       => [{sys,sys_file_read}],
-      file_close      => [{sys,sys_file_close}]
+      file_close      => [{sys,sys_file_close}],
+      file_seek       => [{sys,sys_file_seek}]
      }.
 
 expand_synthetic(Code,_Opts) ->

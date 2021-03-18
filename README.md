@@ -12,13 +12,13 @@ of architectures.
 | rot       | ( a b c -- b c a )   | rotate down |
 | over      | ( a b -- a b a )     |
 | drop      | ( a -- )             |
-| swap      | ( a b -- b a )       |
-| -         | ( a b -- [ a - b ] ) |
-| +         | ( x1 x2 -- [ x1+x2 ] )
-| *         | ( x1 x2 -- [ x1*x2) )
-| nop       | ( -- )               |
+| swap      | ( a b -- b a )         |
+| -         | ( a b -- [ a-b ] )     |
+| +         | ( x1 x2 -- [ x1+x2 ] ) |
+| *         | ( x1 x2 -- [ x1*x2 ] ) |
+| nop       | ( -- )                 |
 | and       | ( a b -- [ a&b ] )
-| or        | ( a b -- [ a|b ] )
+| or        | ( a b -- [ a\|b ] )
 | xor       | ( a b -- [ a^b ] )
 | 0=        | ( a -- [ a==0 ] ) | true = -1
 | 0<        | ( a -- [ a<0 ] )  | true = -1
@@ -193,6 +193,7 @@ top is to the right, the order it is typed in.
 | file\_write     | ( fd buf n -- n t | err f ) | |
 | file\_read      | ( fd buf n -- n t | err f ) | |
 | file\_close     | ( fd -- t | err f ) | |
+| file\_seek      | ( fd offset whence -- offs t | err f ) | |
 
 # Source format
 
