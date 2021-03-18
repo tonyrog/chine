@@ -10,7 +10,11 @@
 -export([start/1, exe_type/1]).
 -export([pack/2]).
 
+-define(NL, "\n").
+%% -define(NL, "\r\n").
+
 -define(HERE, "50F645CD7C7209972B48C3220959677A").
+-define(LINE_LENGTH, 76).
 
 %%
 %% Usage:  chine_pack code.x code
@@ -58,14 +62,20 @@ pack_(ChineFile,Fd) ->
 	     (_, Acc) -> Acc %% ignore other files
 	  end, [], DirList),
     ZeroSize = lists:max([byte_size(Bin) || {_TypeMap,Bin} <- ExeList]),
+    LineBytes = ?LINE_LENGTH + length(?NL),
+    NZBytes = ((ZeroSize + LineBytes - 1) div LineBytes)*?LINE_LENGTH,
+    Zs = erlang:iolist_to_binary(lists:duplicate(NZBytes,$0)),
+    ZData = make_rows(Zs, ?LINE_LENGTH),
+    %% io:format("ZeroSize = ~w\n", [ZeroSize]),
+    %% io:format("iolist_size(ZData) = ~w\n", [iolist_size(ZData)]),
     io:put_chars(Fd,
-		 ["#!/bin/bash\n",
-		  "SM=`uname -s`-`uname -m`\n",
-		  "chmod -f +wx $0\n",
-		  "if [ -n \"\" ]; then\n",
-		  "true <<", ?HERE, "\n",
-		  lists:duplicate(ZeroSize, $0),"\n",
-		  ?HERE, "\n"]),
+		 ["#!/bin/bash", ?NL,
+		  "SM=`uname -s`-`uname -m`",?NL,
+		  "chmod -f +wx $0",?NL,
+		  "if [ -n \"\" ]; then", ?NL,
+		  "true <<", ?HERE, ?NL,
+		  ZData,
+		  ?HERE, ?NL]),
     %% Output executables
     lists:foreach(
       fun({TypeMap,Bin}) ->
@@ -81,14 +91,14 @@ pack_(ChineFile,Fd) ->
     %% 8 hex characters for as offset to program start
     Tail = erlang:iolist_to_binary(
 	     [ChineData,
-	      ?HERE,"\n",
-	      "fi\n",
+	      ?HERE, ?NL,
+	      "fi", ?NL,
 	      ": "]),
     TailLen = tl(integer_to_list(16#100000000+byte_size(Tail)+9,16)),
     io:put_chars(Fd,
-		 ["else\n",
-		  "true <<", ?HERE, "\n",
-		  Tail, TailLen, "\n"]).
+		 ["else", ?NL,
+		  "true <<", ?HERE, ?NL,
+		  Tail, TailLen, ?NL]).
 
 zeropad(Bin, M) ->
     Size = byte_size(Bin),
@@ -107,23 +117,23 @@ read_exe(File) ->
 format_exe(TypeMap, Bin) ->
     Data = format_gzip_base64(Bin),
     UName = make_uname(TypeMap),
-    DD = "dd of=$0 conv=notrunc oflag=seek_bytes seek=0 2>/dev/null",
-    [["elif [ \"$SM\" = \"",UName,"\" ]; then\n"],
-     "(base64 -d | gunzip | ", DD, ") <<", ?HERE, "\n",
+    %% oflag=seek_bytes (not needed, not avail on Darwin 17.7)
+    DD = "dd of=$0 conv=notrunc seek=0 2>/dev/null",
+    Base64 = "base64 --decode",
+    UnZip = "gunzip",
+    [["elif [ \"$SM\" = \"",UName,"\" ]; then", ?NL],
+     "( ", Base64, " | ", UnZip, " | ", DD, ") <<", ?HERE, ?NL,
      Data,
-     ?HERE, "\n",
-     "exec $0 $0\n"
+     ?HERE, ?NL,
+     "exec $0 $0", ?NL
     ].
 
-%% format_base64(Bin) ->
-%%    make_rows(base64:encode(Bin), 76).
-
 format_hex(Bin) ->
-    make_rows(hex_encode(Bin), 76).
+    make_rows(hex_encode(Bin), ?LINE_LENGTH).
 
 format_gzip_base64(Bin) ->
     Bin1 = zlib:gzip(Bin),
-    make_rows(base64:encode(Bin1), 76).
+    make_rows(base64:encode(Bin1), ?LINE_LENGTH).
 
 hex_encode(Binary) ->
     erlang:iolist_to_binary(hex_encode_(Binary)).
@@ -160,11 +170,11 @@ exe_type(File) ->
 make_rows(Data, LineLength) ->
     case Data of
 	<<Line:LineLength/binary, Data1/binary>> ->
-	    [Line, "\n" | make_rows(Data1, LineLength)];
+	    [Line, ?NL | make_rows(Data1, LineLength)];
 	<<>> ->
 	    [];
 	<<Line/binary>> ->
-	    [Line, "\n"]
+	    [Line, ?NL]
     end.
 
 make_uname(#{ operating_system := S, machine := M }) ->
