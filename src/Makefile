@@ -1,7 +1,7 @@
 #@BEGIN-APP-DEFAULT-RULES@
 APP=$(shell basename `cd ..; pwd`)
 ERLC="$(shell which erlc)"
-ERLC_FLAGS=-MMD -MP -MF .$<.d -I ../.. +debug_info
+ERLC_FLAGS=-Wall -MMD -MP -MF .$<.d -I ../.. +debug_info
 YRL_SRC=$(wildcard *.yrl)
 XRL_SRC=$(wildcard *.xrl)
 ERL_SOURCES=$(wildcard *.erl) $(YRL_SRC:%.yrl=%.erl) $(XRL_SRC:%.xrl=%.erl)

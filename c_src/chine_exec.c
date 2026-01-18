@@ -13,11 +13,15 @@
 
 #include "chine.h"
 
-//#define DEBUG(...) printf(__VA_ARGS__)
-#define DEBUG(...)
+#ifdef DEBUG
+#define DEBUGF(...) if (debug) printf(__VA_ARGS__)
+#else
+#define DEBUGF(...)
+#endif
 
 #ifdef TRACE
-#define TRACEF(...) printf(__VA_ARGS__)
+extern int printf(const char* fomat, ...);
+#define TRACEF(...) if (trace) printf(__VA_ARGS__)
 #else
 #define TRACEF(...)
 #endif
@@ -29,6 +33,13 @@ chine_t m;
 extern int32_t chine_unix_sys(chine_t* mp,
 			      int32_t sysop, int32_t* revarg,
 			      int32_t* npop, int32_t* value);
+
+int verbose = 0;
+int debug = 0;
+int trace = 0;
+int mem_size = 0;           // default
+int stack_size = 0;         // default
+int return_stack_size = 0;  // default
 
 // FIXME dynamic!? optional?
 char data[65537];
@@ -205,7 +216,7 @@ int lookup(uint8_t* symb_start, uint8_t* symb_end, char* symbol)
     uint8_t* ptr = symb_start;
     int symlen = str_len(symbol);
 
-    DEBUG("lookup: [%d] %s\n", symlen, symbol);
+    DEBUGF("lookup: [%d] %s\n", symlen, symbol);
 
     while(ptr < symb_end) {
 	uint8_t sn = ptr[0];
@@ -215,7 +226,7 @@ int lookup(uint8_t* symb_start, uint8_t* symb_end, char* symbol)
 	ptr = sptr + sn;
 	vn = ptr[0];
 	vptr = ptr+1;
-	DEBUG("search: vn=%d [%d] %.*s\n", vn, sn, sn, sptr);
+	DEBUGF("search: vn=%d [%d] %.*s\n", vn, sn, sn, sptr);
 	if ((symlen == sn) && (str_cmp((const char*)symbol,
 				       (const char*) sptr, sn) == 0)) {
 	    int offset;
@@ -226,7 +237,7 @@ int lookup(uint8_t* symb_start, uint8_t* symb_end, char* symbol)
 	    default: return -1;
 	    }
 	    TRACEF("symbol %.*s offset %d\n", sn, sptr, offset);
-	    DEBUG("found offst = %d\n", offset);
+	    DEBUGF("found offst = %d\n", offset);
 	    return offset;
 	}
 	ptr = vptr+vn;
@@ -280,7 +291,7 @@ next:
     if ((len = read(fd, buf, 77)) < 0) return -1;
     if ((str_cmp(buf, HERE, 32)) == 0) return ptr - data;
     buf[len] = 0;
-    DEBUG("loaded line %s\n", buf);
+    DEBUGF("loaded line %s\n", buf);
     i = 0;
     while(i < len) {
 	int c1, c0;
@@ -305,16 +316,31 @@ int main(int argc, char** argv)
     uint8_t* code_start;
     uint8_t* code_end;
     off_t offset;
+    int i = 1;
 
-    if (argc == 1) {
-	if (isatty(0))  // otherwise (for now) it a piped chine program
-	    input_file = argv[0];
+    while((i < argc) && (argv[i][0] == '-')) {
+	switch(argv[i][1]) {
+	case 'v': verbose = 1; i++; break;
+	case 't': trace = 1; i++; break;
+	case 'd': debug = 1; i++; break;
+	case 'm': mem_size = atoi(argv[i+1]); i += 2; break;
+	case 's': stack_size = atoi(argv[i+1]); i += 2; break;
+	case 'r': return_stack_size = atoi(argv[i+1]); i += 2; break;
+	default:
+	    error("chinex: unknown option ", argv[i]);
+	    exit(1);
+	}
     }
-    else if (argc > 1) {
-	if (str_cmp((const char*)argv[1], "--", 3) == 0)
+
+    if (i == argc) {
+	if (isatty(0))  // otherwise (for now) it is a piped chine program
+	    input_file = argv[0];  // ???
+    }
+    else if (i < argc) {
+	if (str_cmp((const char*)argv[i], "--", 3) == 0)
 	    input_file = NULL;
 	else
-	    input_file = argv[1];
+	    input_file = argv[i];
     }
     
     if (input_file != NULL) {
@@ -328,7 +354,7 @@ int main(int argc, char** argv)
 	    if ((offset = scan_program_offset(fd)) < 0)
 		error("unable to read offset ", input_file);
 	    
-	    DEBUG("offset = %ld\n", offset);
+	    DEBUGF("offset = %ld\n", offset);
 
 	    if (lseek(fd, -offset, SEEK_END) < 0)
 		error("unable to open seek file ", input_file);
@@ -360,7 +386,7 @@ int main(int argc, char** argv)
     }
     
     if ((offset = lookup(symb_start, symb_end, "run")) < 0)
-	error("node code found in ", argv[1]);
+	error("no code found in ", argv[1]);
 
     chine_set_ip(&m, offset);
 

@@ -1,0 +1,45 @@
+%% -*- erlang -*-
+{export, run}.
+
+{function, [], run, [], [],
+ [
+  {call,alloc,[31,101,103,109,113,117,119]},
+  drop,
+  terminate
+ ]}.
+
+
+{function, [int], alloc, [x1,x2,x3,x4,x5,x6,x7], [a,b,c,d,t],
+ [
+  {call,print,[x1]},
+  {call,print,[x7]},
+  {op,':=',a, 1},
+  {call,print,[a]},
+  {op,':=',b, 2},
+  {call,print,[b]},
+  {op,':=',c, 3},
+  {call,print,[c]},
+  {op,':=',d, 4},
+  {call,print,[d]},
+  {op,':=',t,{op,'+',{op,'+',{op,'+',a,b},c},d}},
+  {call,print,[t]},
+  {op, '+', t, {op, '+', x1, x7}}
+ ]}.
+
+{function, [], print, [x], [],
+ [
+  {'if', {op,'==', x, 0},
+   [$0,emit],
+   {call,uprint,[x]}
+  },
+  $\n, emit
+ ]}.
+
+
+{function, [], uprint, [x], [],
+ [
+  {'if', {op,'!=', x, 0}, 
+   [{call,uprint,[{op,'/',x, 10}]},
+    {op,'+', {op, 'mod', x, 10}, $0}, emit
+   ]}
+ ]}.

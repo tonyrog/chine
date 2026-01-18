@@ -15,7 +15,8 @@
 #include "chine.h"
 
 #ifdef TRACE
-#define TRACEF(...) printf(__VA_ARGS__)
+extern int trace;
+#define TRACEF(...) if (trace) printf(__VA_ARGS__)
 #else
 #define TRACEF(...)
 #endif
@@ -102,11 +103,12 @@ static int store(uint16_t index, uint8_t si,int32_t value)
 }
 
 
+// op1 only
 void* get_const_array(chine_t* mp, cell_t offs)
 {
     uint8_t* aptr = mp->prog + offs;  // get array address
-    if ((*aptr & 7) != ARRAY) return NULL;
-    return (void*)(aptr+get_array_hlen(*aptr)+1);
+    if ((*aptr & 0x0f) != ARRAY) return NULL;
+    return (void*)(aptr+get_arg_len(*aptr)+1);
 }
 
 //
@@ -137,15 +139,16 @@ int chine_unix_sys(chine_t* mp,
     }
 	
     case SYS_NOW: {
-	TRACEF("now");
+	timeout_t t = chine_millis();
+	TRACEF("now=%d\n", t);
 	*npop = 0;
-	*value = chine_millis();
+	*value = t;
 	return 1;
     }
 	
     case SYS_EMIT: {
 	uint8_t c = revarg[0];
-	TRACEF("emit(%d)", c);
+	TRACEF("emit(%d)\n", c);
 	*npop = 1;
 	if (write(1, &c, 1) < 0)
 	    return FAIL_INVALID_ARGUMENT;
@@ -158,7 +161,7 @@ int chine_unix_sys(chine_t* mp,
 	FD_ZERO(&iset);
 	FD_SET(0, &iset);
 	*npop = 0;
-	TRACEF("avail()");
+	TRACEF("avail()\n");
 	if (select(1, &iset, NULL, NULL, &poll) == 1)
 	    *value = CHINE_TRUE;
 	else
@@ -168,7 +171,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_RECV: {
 	uint8_t c;
-	TRACEF("recv()");
+	TRACEF("recv()\n");
 	if (read(0, &c, 1) == 1)
 	    *value = c;
 	else
@@ -177,13 +180,13 @@ int chine_unix_sys(chine_t* mp,
     }
 	
     case SYS_PARAM_FETCH: {
-	TRACEF("param@(param=%04x,index=%d)", revarg[1], revarg[0]);
+	TRACEF("param@(param=%04x,index=%d)\n", revarg[1], revarg[0]);
 	*npop = 2;
 	return fetch(revarg[1], revarg[0], value);
     }
 	
     case SYS_PARAM_STORE: {
-	TRACEF("param!(param=%04x,index=%d,value=%d)",
+	TRACEF("param!(param=%04x,index=%d,value=%d)\n",
 	       revarg[2], revarg[1], revarg[0]);
 	*npop = 3;
 	return store(revarg[2], revarg[1], revarg[0]);
@@ -191,7 +194,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_TIMER_INIT: { // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("timer-init(%d)", i);
+	TRACEF("timer-init(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	CLRBIT(mp->tbits, i);
@@ -201,7 +204,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_TIMER_STOP: {  // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("timer-stop(%d)", i);
+	TRACEF("timer-stop(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	CLRBIT(mp->tbits, i);
@@ -210,7 +213,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_TIMER_START: {  // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("timer-start(%d)", i);
+	TRACEF("timer-start(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	SETBIT(mp->tbits, i);
@@ -220,7 +223,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_TIMER_TIMEOUT: {  // ( i -- f ) 
 	cell_t i = revarg[0];
-	TRACEF("timer-timeout(%d)", i);
+	TRACEF("timer-timeout(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	if (!TSTBIT(mp->tbits,i))
@@ -232,7 +235,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_TIMER_RUNNING:  {  // ( i -- f )
 	cell_t i = revarg[0];
-	TRACEF("timer-running(%d)", i);
+	TRACEF("timer-running(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	*value = CHINE_TEST(TSTBIT(mp->tbits, i) != 0);
@@ -242,7 +245,7 @@ int chine_unix_sys(chine_t* mp,
     case SYS_INPUT_FETCH: {  // ( i k -- v )
 	cell_t k = revarg[0];
 	cell_t i = revarg[1];
-	TRACEF("input@(%d.%d)", k, i);
+	TRACEF("input@(%d.%d)\n", k, i);
 	*npop = 2;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
 	switch(k) {
@@ -258,7 +261,7 @@ int chine_unix_sys(chine_t* mp,
 	cell_t n = revarg[0];
 	cell_t k = revarg[1];
 	cell_t i = revarg[2];
-	TRACEF("output!([%d].%d,%d)", k, i, n);
+	TRACEF("output!([%d].%d,%d)\n", k, i, n);
 	*npop = 3;
 	if ((i < 0) || (i >= 32)) return FAIL_INVALID_ARGUMENT;
 	switch(k) {
@@ -271,7 +274,7 @@ int chine_unix_sys(chine_t* mp,
     }
 
     case SYS_DESELECT_ALL: {  // ( -- )
-	TRACEF("deselect-all");
+	TRACEF("deselect-all\n");
 	memset(mp->imask, 0, sizeof(mp->imask));
 	memset(mp->tmask, 0, sizeof(mp->tmask));
 	return 0;
@@ -279,7 +282,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_SELECT_INPUT: { // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("select-input(%d)", i);
+	TRACEF("select-input(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i >= MAX_INPUT)) return FAIL_INVALID_ARGUMENT;
 	SETBIT(mp->imask, i);
@@ -288,7 +291,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_DESELECT_INPUT: { // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("deselect-input(%d)", i);
+	TRACEF("deselect-input(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i >= MAX_INPUT)) return FAIL_INVALID_ARGUMENT;
 	CLRBIT(mp->imask, i);
@@ -297,7 +300,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_SELECT_TIMER: { // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("select-timer(%d)", i);
+	TRACEF("select-timer(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	SETBIT(mp->tmask, i);
@@ -306,7 +309,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_DESELECT_TIMER: { // ( i -- )
 	cell_t i = revarg[0];
-	TRACEF("deselect-timer(%d)", i);
+	TRACEF("deselect-timer(%d)\n", i);
 	*npop = 1;
 	if ((i < 0) || (i>=MAX_TIMERS)) return FAIL_TIMER_OVERFLOW;
 	CLRBIT(mp->tmask, i);
@@ -314,7 +317,7 @@ int chine_unix_sys(chine_t* mp,
     }
 
     case SYS_GPIO_INPUT: {
-	TRACEF("gpio_input(%d)", revarg[0]);
+	TRACEF("gpio_input(%d)\n", revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
 	pinMode(revarg[0], INPUT);
@@ -322,7 +325,7 @@ int chine_unix_sys(chine_t* mp,
 	return 0;
     }
     case SYS_GPIO_OUTPUT: {
-	TRACEF("gpio_output(%d)",revarg[0]);
+	TRACEF("gpio_output(%d)\n",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
 	pinMode(revarg[0], OUTPUT);
@@ -330,7 +333,7 @@ int chine_unix_sys(chine_t* mp,
 	return 0;
     }
     case SYS_GPIO_SET: {
-	TRACEF("gpio_set(%d)",revarg[0]);
+	TRACEF("gpio_set(%d)\n",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
 	digitalWrite(revarg[0], HIGH);
@@ -338,7 +341,7 @@ int chine_unix_sys(chine_t* mp,
 	return 0;
     }
     case SYS_GPIO_CLR: {
-	TRACEF("gpio_clr(%d)",revarg[0]);
+	TRACEF("gpio_clr(%d)\n",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
 	digitalWrite(revarg[0], LOW);
@@ -346,7 +349,7 @@ int chine_unix_sys(chine_t* mp,
 	return 0;
     }
     case SYS_GPIO_GET: {
-	TRACEF("gpio_get(%d)",revarg[0]);
+	TRACEF("gpio_get(%d)\n",revarg[0]);
 	*npop = 1;
 #if defined(WIRINGPI)
 	*value = digitalRead(revarg[0]);
@@ -358,7 +361,7 @@ int chine_unix_sys(chine_t* mp,
 	
     case SYS_ANALOG_SEND: {
 	*npop = 2;
-	TRACEF("analog_send(%d,%u)",revarg[1],revarg[0]);
+	TRACEF("analog_send(%d,%u)\n",revarg[1],revarg[0]);
 #if defined(WIRINGPI)
 	analogWrite(revarg[1],revarg[0]>>8);
 #endif
@@ -367,7 +370,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_ANALOG_RECV: {
 	*npop = 1;
-	TRACEF("analog_recv(%d)",revarg[0]);
+	TRACEF("analog_recv(%d)\n",revarg[0]);
 #if defined(WIRINGPI)
 	*value = analogRead(revarg[0])<<6;
 #else
@@ -381,7 +384,7 @@ int chine_unix_sys(chine_t* mp,
 	int baud = revarg[1];
 	int mode = revarg[2];
 	int fd;
-	TRACEF("uart_connect(tty=%s,baud=%d,mode=%d)",tty,baud,mode);
+	TRACEF("uart_connect(tty=%s,baud=%d,mode=%d)\n",tty,baud,mode);
 	*npop = 2;	
 #if defined(WIRINGPI)
 	if ((fd = serialOpen(tty, baud)) < 0) {
@@ -412,7 +415,7 @@ int chine_unix_sys(chine_t* mp,
 	uint8_t val = revarg[0];
 	(void)fd;
 	(void)val;
-	TRACEF("uart_send(fd=%d,val=%c)", fd, (char)val);
+	TRACEF("uart_send(fd=%d,val=%c)\n", fd, (char)val);
 #if defined(WIRINGPI)
 	serialPutchar(fd, val);
 	*npop = 2;
@@ -434,7 +437,7 @@ int chine_unix_sys(chine_t* mp,
     case SYS_UART_RECV: { // ( fd -- char t | err f )
 	int fd = revarg[0];
 	uint8_t c;
-	TRACEF("uart_recv(fd=%d)", fd);
+	TRACEF("uart_recv(fd=%d)\n", fd);
 	*npop = 0;
 #if defined(WIRINGPI)
 	revarg[0] = serialGetchar(fd);
@@ -455,7 +458,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_UART_AVAIL: { // ( fd -- flag )
 	int fd    = revarg[0];
-	TRACEF("uart_avail(fd=%d)", fd);
+	TRACEF("uart_avail(fd=%d)\n", fd);
 	*npop = 1;
 #if defined(WIRINGPI)
 	*value = CHINE_TEST(serialDataAvil(fd));
@@ -493,7 +496,7 @@ int chine_unix_sys(chine_t* mp,
 	(void) dev;
 	(void) bitrate;
 	(void) mode;
-	TRACEF("can_connect(%s,%d,%d)",dev,bitrate,mode);
+	TRACEF("can_connect(%s,%d,%d)\n",dev,bitrate,mode);
 	revarg[2] = 12;
 	*value = CHINE_TRUE;
 	*npop = 1;
@@ -511,7 +514,7 @@ int chine_unix_sys(chine_t* mp,
 	(void) len;
 	(void) fid;
 	(void) fd;
-	TRACEF("can_send(fd=%d,fid=%x,len=%d,A=%x,B=%x)", fd, fid, len, A, B);
+	TRACEF("can_send(fd=%d,fid=%x,len=%d,A=%x,B=%x)\n", fd, fid, len, A, B);
 	*npop = 5;
 	*value = CHINE_TRUE;
 	return 1;
@@ -523,7 +526,7 @@ int chine_unix_sys(chine_t* mp,
 	uint32_t B = 0xC0FFE000;
 	uint32_t fid = 0x123;
 	(void)fd;
-	TRACEF("can_recv(fd=%d)", fd);
+	TRACEF("can_recv(fd=%d)\n", fd);
 	revarg[0] = fid;
 	revarg[-1] = 7;
 	revarg[-2] = B;
@@ -545,7 +548,7 @@ int chine_unix_sys(chine_t* mp,
 	char* name = (char*)get_const_array(mp,revarg[1]);
 	int flags  = revarg[0];
 	int fd;
-	TRACEF("file_open(%s,%d)", name, flags);
+	TRACEF("file_open(%s,%d)\n", name, flags);
 	if ((fd=open(name, flags, 0666)) < 0) {
 	    *npop = 1;
 	    revarg[1] = errno;
@@ -564,7 +567,7 @@ int chine_unix_sys(chine_t* mp,
 	void* buf    = get_const_array(mp, revarg[1]);
 	size_t count = revarg[0];
 	ssize_t n;
-	TRACEF("file_write(%d,%p,%lu)", fd, buf, count);
+	TRACEF("file_write(%d,%p,%lu)\n", fd, buf, count);
 	if ((n=write(fd,buf,count)) < 0) {
 	    *npop = 2;
 	    revarg[2] = errno;
@@ -583,7 +586,7 @@ int chine_unix_sys(chine_t* mp,
 	void* buf    = get_const_array(mp, revarg[1]);
 	size_t count = revarg[0];
 	ssize_t n;
-	TRACEF("file_read(%d,%p,%lu)", fd, buf, count);
+	TRACEF("file_read(%d,%p,%lu)\n", fd, buf, count);
 	if ((n=read(fd,buf,count)) < 0) {
 	    *npop = 2;
 	    revarg[2] = errno;
@@ -599,7 +602,7 @@ int chine_unix_sys(chine_t* mp,
 
     case SYS_FILE_CLOSE: {
 	int fd = revarg[0];
-	TRACEF("file_close(%d)", fd);
+	TRACEF("file_close(%d)\n", fd);
 	if (close(fd) < 0) {
 	    *npop = 0;
 	    revarg[0] = errno;
@@ -616,7 +619,7 @@ int chine_unix_sys(chine_t* mp,
 	int fd       = revarg[2];
 	off_t offset = revarg[1];
 	int whence   = revarg[0];
-	TRACEF("file_seek(%d,%d,%d)", fd, offset, whence);
+	TRACEF("file_seek(%d,%ld,%d)\n", fd, offset, whence);
 	offset = lseek(fd,offset,whence);
 	if ((int)offset == -1) {
 	    *npop = 2;
@@ -632,7 +635,7 @@ int chine_unix_sys(chine_t* mp,
     }
 	
     default:
-	TRACEF("????");
+	TRACEF("????\n");
 	*npop = 0;
 	return FAIL_INVALID_ARGUMENT;
     }

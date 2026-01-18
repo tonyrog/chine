@@ -6,6 +6,9 @@
 
 [
  {label,run},
+ %% 12345, {call, uprint}, $\n, emit,
+ %% terminate, 
+ 12, {call, factorial}, {call, println},
 
  now,
  1000000,
@@ -20,9 +23,7 @@
  %% BENCH : ( n -- )
  {label,bench},
  {label,bench_loop},
- 12,
- {call, factorial},
- drop,
+ 12, {call, factorial}, drop,
  '1-',
  dup, {jmpnz, bench_loop},
  drop,
@@ -33,7 +34,7 @@
 [ 
  %% FACTORIAL: ( n -- n! )
  {label,factorial},
- dup,       %% ( r n )
+ dup,          %% ( r n )
  {label,fact_loop},
  '1-',         %% ( r n )
  dup, {jmpz,fact_done},
@@ -68,9 +69,11 @@
 %% UPRINT: ( n -- ) n>=0
 [
  {label,uprint},
- dup, '0=',
- {'if', [drop,exit]},
- dup, 10,'/',{call,uprint},  %% print(n/10)
- 10,mod,$0,'+',emit,
+ dup, '0=', {'if', [drop,exit]},
+ dup, 10, mod,   %% 123 123 10 % = 123 3
+ swap,           %% 3 123
+ 10,'/',         %% 3 12
+ {call,uprint},
+ $0,'+',emit,
  exit
 ].

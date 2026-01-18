@@ -18,7 +18,7 @@ int32_t test_code_pop(uint8_t* prog, size_t len)
     uint8_t  imask[NUM_IBYTES];   // input mask
     timeout_t tmo = 0xffffffff;
 
-    memset(m.stack, 0xff, sizeof(m.stack));    
+    memset(m.mem + MAX_MEM, 0xff, sizeof(MAX_STACK));    
     chine_init(&m, prog, chine_unix_sys);
     chine_set_ip(&m, 0);
 

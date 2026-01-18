@@ -11,7 +11,14 @@
 
 -export([effect/1, minmax_depth/1]).
 -export([print_stack_effect/2]).
--export([opcodes/0, syscalls/0]).
+-export([opcodes/0, jopcodes/0, syscalls/0, synthetic_opcodes/0]).
+-export([new_label/0, add_enums/2, normalize_label/1]).
+-export([expand_synthetic/2]).
+-export([asm_list/2]).
+-export([options/0]).
+-export([effect_all/0]).
+
+-export([encode_array/2]).
 
 -include("../include/chine.hrl").
 
@@ -112,21 +119,47 @@ do_version() ->
 	    io:format("no version available\n", [])
     end.
 
-do_input([File], Opts) ->
-    case file:consult(File) of
+do_input([Filename], Opts) ->
+    case file:consult(Filename) of
 	{ok,Ls0} ->
 	    Ls = lists:flatten(Ls0),
-	    try asm_list(Ls,Opts) of
-		AsmResult ->
-		    do_emit(AsmResult, Opts)
-	    catch
-		?EXCEPTION(error,Reason,StackTrace) ->
-		    io:format(standard_error, "~s:error: ~p\n~p", 
-			      [?PROG, Reason,
-			       ?GET_STACK(StackTrace)
-			      ]),
-		    halt(1)
+	    case filename:extension(Filename) of
+		".ch" ->
+		    try asm_list(Ls,Opts) of
+			AsmResult ->
+			    do_emit(AsmResult, Opts)
+		    catch
+			?EXCEPTION(error,Reason,StackTrace) ->
+			    io:format(standard_error, "~s:error: ~p\n~p", 
+				      [?PROG, Reason,
+				       ?GET_STACK(StackTrace)
+				      ]),
+			    halt(1)
+		    end;
+		".chi" ->
+		    try chi:module(Ls) of
+			{Asm, _} ->
+			    try asm_list(Asm,Opts) of
+				AsmResult ->
+				    do_emit(AsmResult, Opts)
+			    catch
+				?EXCEPTION(error,Reason,StackTrace) ->
+				    io:format(standard_error, "~s:error: ~p\n~p", 
+					      [?PROG, Reason,
+					       ?GET_STACK(StackTrace)
+					      ]),
+				    halt(1)
+			    end
+		    catch
+			?EXCEPTION(error,Reason,StackTrace) ->
+			    io:format(standard_error, "~s:error: ~p\n~p", 
+				      [?PROG, Reason,
+				       ?GET_STACK(StackTrace)
+				      ]),
+			    halt(1)
+		    end
 	    end;
+		    
 	{error,Reason} ->
 	    io:format(standard_error,
 		      "~s:error: ~p\n", 
@@ -276,9 +309,16 @@ jopcodes() ->
       ?JENUM(jmp),
       ?JENUM(call),
       ?JENUM(literal),
-      ?JENUM(array),
+      ?JENUM(jop_7),
       %% opcode1
-      ?JENUM(arg)
+      ?JENUM(arg),
+      ?JENUM(array),
+      ?JENUM(fenter),
+      ?JENUM(fleave),
+      ?JENUM(jop_12),
+      ?JENUM(jop_13),
+      ?JENUM(jop_14),
+      ?JENUM(jop_15)
      }.
 
 opcodes() ->
@@ -315,7 +355,9 @@ opcodes() ->
       ?ENUM('fp@'),
       ?ENUM('fp!'),
       ?ENUM('sp@'),
-      ?ENUM('sp!')
+      ?ENUM('sp!'),
+      ?ENUM('c!'),
+      ?ENUM('c@')
      }.
 
 syscalls() ->
@@ -376,7 +418,9 @@ synthetic_opcodes() ->
       '<='  => ['-', '0<='],
       '>='  => [swap,'-', '0<='],
       '='   => ['-', '0='],
-      '<>'  => ['-', 'not'],
+      '=='  => ['-', '0='],
+      '!='  => ['-', '0=', 'not'],
+      '<>'  => ['-', '0=', 'not'],
       'u<'  => ['2dup','xor','0<',
 		{'if',[swap,drop,'0<'],['-','0<']}],
       'u<=' => ['2dup','xor','0<',
@@ -404,8 +448,11 @@ synthetic_opcodes() ->
       'jmp*'  => ['>r', exit],  %% ( caddr -- )
       ';'     => [exit],
 
-      'fenter' => ['fp@','>r','sp@','fp!'],
-      'fleave' => ['fp@','r>','fp!','sp!'],
+      'alloc'  => ['sp@',swap,'-','sp!'],
+
+      'here'   => [ 0, '@' ],
+      
+      'comma' => [here, swap, over, 'c!', '1+', 0, '!' ],
 
       %% utils
       'setbit'    => [{const,1},swap,shift,'or'],
@@ -466,9 +513,13 @@ synthetic_opcodes() ->
       file_seek       => [{sys,sys_file_seek}]
      }.
 
+
 expand_synthetic(Code,_Opts) ->
     expand_synth_(Code,[],#{}).
 
+expand_synth_([{'def', Name, Body}|Code], Acc, Sym) ->
+    expand_synth_([{export,Name},
+		   [{label,Name}]++Body++[exit] | Code], Acc, Sym);
 expand_synth_([{'if',Then}|Code],Acc,Sym) ->
     L = new_label(),
     Block = [{{jop,jmpz},L},Then,{label,L}],
@@ -498,7 +549,7 @@ expand_synth_([{'for',Loop}|Code],Acc,Sym) ->
     Block = ['>r', {label,L0},Loop,{{jop,next},L0}],
     expand_synth_(Block++Code,Acc,Sym);
 expand_synth_([{enum,Ls}|Code],Acc,Sym) ->
-    Sym1 = add_enums_(Ls, 0, Sym),
+    Sym1 = add_enums(Ls, Sym),
     expand_synth_(Code,Acc,Sym1);
 expand_synth_([{define,Name,Value}|Code],Acc,Sym) ->
     Sym1 = maps:put({symbol,Name},Value,Sym),
@@ -564,11 +615,24 @@ expand_synth_([Ops|Code],Acc,Sym) when is_list(Ops) ->
 expand_synth_([],Acc,Sym) ->
     {lists:reverse(Acc),Sym}.
 
+add_enums(Es, Sym) ->
+    add_enums_(Es, 0, Sym).
+
 add_enums_([E|Es], I, Sym) ->
     Sym1 = maps:put({symbol,E}, I, Sym),
     add_enums_(Es, I+1, Sym1);
 add_enums_([], _I, Sym) ->
-    Sym.
+    Sym.    
+
+new_label() ->
+    case get(next_label) of
+	undefined ->
+	    put(next_label, 1),
+	    "L0";
+	I ->
+	    put(next_label, I+1),
+	    [$L|integer_to_list(I)]
+    end.
 
 normalize_label(L) when is_atom(L) ->    
     atom_to_list(L);
@@ -583,6 +647,7 @@ normalize_label(L) when is_list(L) ->
 	    io:format(standard_error, "label name not string ~p\n", [L]),
 	    erlang:error({label_not_string, L})
     end.
+
 
 %%
 %% Replace branch labels with offsets
@@ -629,18 +694,21 @@ resolve_labels_([], Acc, Map, _Addr) ->
     {lists:reverse(Acc), Map}.
 
 %% resolve absolute addresses
-resolve_caddr([{caddr,K,L}|Code], Acc, Map) ->
+resolve_caddr([{caddr,LType,L}|Code], Acc, Map) ->
     [Target] = maps:get(L, Map),
-    resolve_caddr(Code, [{literal,K,Target}|Acc], Map);
+    resolve_caddr(Code, [{literal,LType,Target}|Acc], Map);
 
-resolve_caddr([{array,Ka,Es}|Code], Acc, Map) ->
+resolve_caddr([{array,Type,Es}|Code], Acc, Map) ->
     Es1 = [ case E of
 		{literal,_,_} -> E;
-		{caddr,K,L} ->
+		{caddr,L} ->
 		    [Target] = maps:get(L, Map),
-		    {literal,K,Target}
+		    Target;
+		_ when is_integer(E);
+		       is_float(E) ->
+		    E
 	    end || E <- Es],
-    resolve_caddr(Code, [{array,Ka,Es1}|Acc], Map);
+    resolve_caddr(Code, [{array,Type,Es1}|Acc], Map);
 resolve_caddr([Op|Code], Acc, Map) ->
     resolve_caddr(Code, [Op|Acc], Map);
 resolve_caddr([], Acc, _Map) ->
@@ -813,7 +881,7 @@ collect_blocks_([Op1|Code1=[Op2|Code2]], Block, Acc,Z)
     N1 = maps:get(Op1, Map),
     N2 = maps:get(Op2, Map),
     if N1 < 8, N2 < 8 ->
-	    collect_blocks_(Code2,[{Op1,Op2}|Block], Acc,Z+1);
+	    collect_blocks_(Code2,[{Op2,Op1}|Block], Acc,Z+1);
        true ->
 	    collect_blocks_(Code1, [Op1|Block], Acc,Z)
     end;
@@ -858,35 +926,33 @@ encode_const_([{arg,I}|Code], Acc) ->
 	       T -> T
 	   end,
     encode_const_(Code, [{arg,Type,I}|Acc]);
+encode_const_([{fenter,I}|Code], Acc) ->
+    Type = case type_integer(I) of
+	       int3 -> int8;  %% int3 is not available for opcode1
+	       T -> T
+	   end,
+    encode_const_(Code, [{fenter,Type,I}|Acc]);
+encode_const_([{fleave,I}|Code], Acc) ->
+    Type = case type_integer(I) of
+	       int3 -> int8;  %% int3 is not available for opcode1
+	       T -> T
+	   end,
+    encode_const_(Code, [{fleave,Type,I}|Acc]);
+
 encode_const_([{caddr,L}|Code], Acc) ->
-    %% caddr is an offset from program start, can only 
-    %% be calculated when all labels have been calculated
-    %% but is now assumed to fit in a 16 bit integer FIXME
-    encode_const_(Code, [{caddr,uint16,L}|Acc]);
+    encode_const_(Code, [{caddr,L}|Acc]);
 encode_const_([{string,S}|Code], Acc) when is_list(S) ->
-    encode_const_([{array,[{const,uint8,C} || C <- S]}|Code], Acc);
+    %% fixme: unicode
+    encode_const_([{array,[{{uint,8},C} || C <- S]}|Code], Acc);
 encode_const_([{string,S}|Code], Acc) when is_binary(S) ->
-    encode_const_([{array,[{const,uint8,C} || <<C>> <= S]}|Code], Acc);
+    %% fixme: utf8
+    encode_const_([{array,[{{uint,8},C} || <<C>> <= S]}|Code], Acc);
 encode_const_([{array,Es}|Code], Acc) ->
-    N = length(Es),
-    Es1 = [case E of
-	       {const,C} -> encode_literal(C);
-	       {const,Type,Value} -> {literal,Type,Value};
-	       {caddr,L} -> {caddr,uint16,L} %% FIXME
-	   end || E <- Es],
-    K = if N =:= 0 -> 1;
-	   true -> lists:max([opcode_length(Op) || Op <- Es1])
-	end,
-    A = if N < 8, K=:=1       -> {array,uint3x8,Es1};
-	   N < 8, K=:=2       -> {array,uint3x8,Es1};
-	   N < 256, K=:=2     -> {array,uint8x8,Es1};
-	   N < 256, K=:=3     -> {array,uint8x16,Es1};
-	   N < 256, K=:=5     -> {array,uint8x32,Es1};
-	   N < 65536, K =:= 2 -> {array,uint16x8,Es1};
-	   N < 65536, K =:= 3 -> {array,uint16x16,Es1};
-	   N < 65536, K =:= 5 -> {array,uint16x32,Es1}
-	end,
+    A = encode_array(Es, undefined),
     encode_const_(Code, [A|Acc]);
+encode_const_([{array,Type,Es}|Code], Acc) ->
+    A = encode_array(Es, Type),
+    encode_const_(Code, [A|Acc]);    
 encode_const_([{sys, SysOp}|Code], Acc) ->
     Sys = maps:get(SysOp, syscalls()),
     encode_const_(Code, [{sys,Sys}|Acc]);
@@ -895,20 +961,95 @@ encode_const_([C|Code],Acc) ->
 encode_const_([],Acc) ->
     lists:reverse(Acc).
 
+%% encode array
+encode_array(Es, EType0) ->
+    {EType, Es1}  = encode_array_elements(Es, EType0, []),
+    {array, EType, Es1}.
+
+encode_array_elements([E|Es],Type,Acc) ->
+    case E of
+	{EType, V} ->
+	    encode_array_elements(Es,union_type(EType, Type),[V|Acc]);
+	I when is_integer(I) ->
+	    N = nbits(I),
+	    encode_array_elements(Es,union_type({int,N},Type),[I|Acc]);
+	F when is_float(F) ->
+	    encode_array_elements(Es,union_type({float,32},Type),[F|Acc])
+    end;
+encode_array_elements([],Type,Acc) ->
+    Type1 = pow2_type(Type),
+    {Type,coerce_array_element(Type1,Acc,[])}.
+
+coerce_array_element(Type, [E|Es], Acc) -> 
+    case Type of
+	{float,32} ->
+	    coerce_array_element(Type,Es,[float(E)|Acc]);
+	{uint,N} ->
+	    M = (1 bsl N) - 1,
+	    coerce_array_element(Type,Es,[(trunc(E) band M)|Acc]);
+	{int,N} -> 
+	    _M = (1 bsl N) - 1,  %% fixme
+	    coerce_array_element(Type,Es,[trunc(E)|Acc])
+    end;
+coerce_array_element(_Type, [], Acc) ->
+    Acc.
+
+pow2_type({int,N}) -> 
+    if N < 8 -> {int,8};
+       N < 16 -> {int,16};
+       N < 32 -> {int,32}
+    end;
+pow2_type({uint,N}) -> 
+    if N < 8 ->  {uint,8};
+       N < 16 -> {uint,16};
+       N < 32 -> {uint,32}
+    end;
+pow2_type({float,_N}) ->
+    {float,32}.
+    
+encode_element_type({int, 8})  -> 16#80;
+encode_element_type({int, 16}) -> 16#81;
+encode_element_type({int, 32}) -> 16#82;
+encode_element_type({uint, 8})  -> 16#00;
+encode_element_type({uint, 16}) -> 16#01;
+encode_element_type({uint, 32}) -> 16#02;
+encode_element_type({float, 32}) -> 16#92.
+
+union_type(undefined, T)       -> T;
+union_type(T,undefined)        -> T;
+union_type(T, T)               -> T;
+union_type({float,32}, _)      -> {float,32};
+union_type(_, {float,32})      -> {float,32};
+union_type({int,N},{int,M})    -> {int,max(N,M)};
+union_type({uint,N},{uint,M})  -> {uint,max(N,M)};
+union_type({int,N},{uint,M})   -> {int,max(N,M)};
+union_type({uint,N},{int,M})   -> {int,max(N,M)}.
+
+nbits(0) -> 1;
+nbits(N) when is_integer(N), N > 0 ->
+    trunc(math:log2(N))+1;
+nbits(N) when is_integer(N), N < 0 ->
+    trunc(math:log2(-N))+1.
+    
 %% encode some integer constants
 encode_literal(true)    -> encode_literal(?CHINE_TRUE);
 encode_literal(false)   -> encode_literal(?CHINE_FALSE);
 encode_literal(boolean) -> encode_literal(?INPUT_BOOLEAN);
 encode_literal(analog)  -> encode_literal(?INPUT_ANALOG);
 encode_literal(encoder) -> encode_literal(?INPUT_ENCODER);
-encode_literal(I) when is_integer(I) -> 
-    {literal,type_integer(I), I}.
+encode_literal(I) when is_integer(I) -> {literal,type_integer(I), I}.
 
 type_integer(I) when is_integer(I) ->
     if I >= -4, I =< 3 -> int3;
        I >= -16#80, I =< 16#7f -> int8;
        I >= -16#8000, I =< 16#7fff -> int16;
        I >= -16#80000000, I =< 16#7fffffff -> int32;
+       I =< 16#ffffffff -> uint32
+    end.
+
+type_unsigned(I) when is_integer(I), I >= 0 ->
+    if I =< 16#ff -> uint8;
+       I =< 16#ffff -> uint16;
        I =< 16#ffffffff -> uint32
     end.
 
@@ -935,23 +1076,31 @@ opcode_length({literal,uint8,_X}) -> 2;
 opcode_length({literal,uint16,_X}) -> 3;
 opcode_length({literal,uint32,_X}) -> 5;
 
+opcode_length({array,EType,Es}) ->
+    N = length(Es),
+    VL = variant_length(EType),
+    Size = 1+N*VL,  %% Size is byte size for all element + type
+    SType = type_integer(Size),  %% type for encoding length (Size)
+    ArgLen = variant_length(SType),
+    1+ArgLen+Size;
+
 %% opcode1 only no int3 encoding
 opcode_length({arg,int8,_X}) -> 2;
 opcode_length({arg,int16,_X}) -> 3;
 opcode_length({arg,int32,_X}) -> 5;
 
+opcode_length({fenter,int8,_X}) -> 2;
+opcode_length({fenter,int16,_X}) -> 3;
+opcode_length({fenter,int32,_X}) -> 5;
+
+opcode_length({fleave,int8,_X}) -> 2;
+opcode_length({fleave,int16,_X}) -> 3;
+opcode_length({fleave,int32,_X}) -> 5;
+
 opcode_length({caddr,uint3,_L})  -> 1;
 opcode_length({caddr,uint8,_L})  -> 2;
 opcode_length({caddr,uint16,_L}) -> 3;
 opcode_length({caddr,uint32,_L}) -> 5;
-
-opcode_length({array,uint3x8,Ls})  -> 1+length(Ls);
-opcode_length({array,uint8x8,Ls})  -> 1+1+length(Ls);
-opcode_length({array,uint8x16,Ls}) -> 1+1+2*length(Ls);
-opcode_length({array,uint8x32,Ls}) -> 1+1+4*length(Ls);
-opcode_length({array,uint16x8,Ls}) -> 1+2+length(Ls);
-opcode_length({array,uint16x16,Ls}) -> 1+2+2*length(Ls);
-opcode_length({array,uint16x32,Ls}) -> 1+2+4*length(Ls);
 
 opcode_length({{jop,_,int3},_})  -> 1;
 opcode_length({{jop,_,int8},_})  -> 2;
@@ -984,15 +1133,29 @@ encode_opcodes_([{literal,Kv,I}|Code], Acc, Map) ->
     OP = ?OPCODE1(?JOP(literal),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
-%% arg must is OPCODE1 only!
-encode_opcodes_([{arg,int3,I}|Code], Acc, Map) ->
-    OP = ?OPCODE1(?JOP(arg),I),
-    encode_opcodes_(Code,[OP|Acc],Map);
+%% arg is OPCODE1 only!
+%%encode_opcodes_([{arg,int3,I}|Code], Acc, Map) ->
+%%    OP = ?OPCODE1(?JOP(arg),I),
+%%    encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([{arg,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
     OP = ?OPCODE1(?JOP(arg),Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
+
+encode_opcodes_([{fenter,Kv,I}|Code], Acc, Map) ->
+    K = variant_length(Kv),
+    Kc = variant_code(Kv),
+    Is = encode_integer(I,K),
+    OP = ?OPCODE1(?JOP(fenter),Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
+
+encode_opcodes_([{fleave,Kv,I}|Code], Acc, Map) ->
+    K = variant_length(Kv),
+    Kc = variant_code(Kv),
+    Is = encode_integer(I,K),
+    OP = ?OPCODE1(?JOP(fleave),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
 encode_opcodes_([{{jop,Jmp,int3},I}|Code], Acc, Map) ->
@@ -1008,32 +1171,30 @@ encode_opcodes_([{{jop,Jmp,Kv},Offset}|Code], Acc, Map) ->
     Is = encode_integer(Offset,K),
     OP = ?OPCODE1(N,Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
-%% ARRAY
-encode_opcodes_([{array,uint3x8,Es}|Code],Acc,Map) ->
+encode_opcodes_([{array,EType,Es}|Code],Acc,Map) ->
     N = length(Es),
-    Is = [encode_integer(X,1) || {literal,_,X} <- Es],
-    Ls = lists:append(Is),
-    OP = ?OPCODE2(?JOP(array),N),
-    encode_opcodes_(Code,cat(Ls,[OP|Acc]),Map);    
-encode_opcodes_([{array,Kv,Es}|Code],Acc,Map) ->
-    N = length(Es),
-    K = variant_length(Kv),
-    Kc = variant_code(Kv),
-    Ke = element_length(Kv),
-    Ns = encode_integer(N,K),
-    Is = [encode_integer(X,Ke) || {literal,_,X} <- Es],
-    Ls = Ns ++ lists:append(Is),
-    OP = ?OPCODE1(?JOP(array),Kc),
-    encode_opcodes_(Code,cat(Ls,[OP|Acc]),Map);
+    VL = variant_length(EType),
+    Size = 1+N*VL,
+    VType = case type_integer(Size) of
+		int3 -> int8;  %% int3 is not available for opcode1
+		T -> T
+	    end,
+    VC = variant_code(VType),  %% length varient code
+    %% encode element type
+    ET = encode_element_type(EType),
+    Is = lists:append([encode_array_element(E, EType) || E <- Es]),
+    OP = ?OPCODE1(?JOP(array),VC),
+    Ns = encode_integer(Size, variant_length(VType)),
+    encode_opcodes_(Code,cat([OP|Ns]++[ET|Is],Acc),Map);
 %% SYS
 encode_opcodes_([{sys,Sys}|Code],Acc,Map) ->
     OP = ?OPCODE0(?OP(sys)),
     encode_opcodes_(Code, [Sys,OP|Acc],Map);
-encode_opcodes_([{Op1,Op2}|Code],Acc,Map) ->
+encode_opcodes_([{Op2,Op1}|Code],Acc,Map) ->
     N1 = maps:get(Op1,Map),
     N2 = maps:get(Op2,Map),
     if N1 < 8, N2 < 8 -> true end,
-    OP = ?OPCODE3(N1,N2),
+    OP = ?OPCODE3(N2,N1),
     encode_opcodes_(Code,[OP|Acc],Map);
 encode_opcodes_([Op|Code], Acc, Map) ->
     N = maps:get(Op,Map),
@@ -1044,31 +1205,24 @@ encode_opcodes_([], Acc, _Map) ->
     list_to_binary(lists:reverse(Acc)).
 
 %%
-%%variant_length(int3)  -> 0;
+variant_length(int3)  -> 0;     %% op2
+variant_length({int,3})  -> 0;  %% op2
+variant_length(uint3)  -> 0;    %% op2
+variant_length({uint,3})  -> 0; %% op2
+variant_length({int,8})  -> 1;
+variant_length({int,16}) -> 2;
+variant_length({int,32}) -> 4;
+variant_length({uint,8})  -> 1;
+variant_length({uint,16}) -> 2;
+variant_length({uint,32}) -> 4;
+variant_length({float,32}) -> 4;
 variant_length(int8)  -> 1;
 variant_length(int16) -> 2;
 variant_length(int32) -> 4;
-variant_length(int64) -> 8;
-%%variant_length(uint3)  -> 0;
 variant_length(uint8)  -> 1;
 variant_length(uint16) -> 2;
 variant_length(uint32) -> 4;
-variant_length(uint64) -> 8;
-%%variant_length(uint3x8)   -> 0;
-variant_length(uint8x8)   -> 1;
-variant_length(uint8x16)  -> 1;
-variant_length(uint8x32)  -> 1;
-variant_length(uint16x8)  -> 2;
-variant_length(uint16x16) -> 2;
-variant_length(uint16x32) -> 2.
-
-element_length(uint3x8)   -> 1;
-element_length(uint8x8)   -> 1;
-element_length(uint8x16)  -> 2;
-element_length(uint8x32)  -> 4;
-element_length(uint16x8)  -> 1;
-element_length(uint16x16) -> 2;
-element_length(uint16x32) -> 4.
+variant_length(float32) -> 4.
 
 variant_code(int8)      -> 0;
 variant_code(int16)     -> 1;
@@ -1083,6 +1237,10 @@ variant_code(uint16x8)  -> 4;
 variant_code(uint16x16) -> 5;
 variant_code(uint16x32) -> 6.
 
+encode_array_element(Value, {int,N}) -> binary_to_list(<<Value:N/signed>>);
+encode_array_element(Value, {uint,N}) -> binary_to_list(<<Value:N/unsigned>>);
+encode_array_element(Value, {float,N}) -> binary_to_list(<<Value:N/float>>).
+
 %% encode offset of K bytes as byte list
 encode_integer(X,1) -> binary_to_list(<<X:8>>);
 encode_integer(X,2) -> binary_to_list(<<X:16>>);
@@ -1094,16 +1252,6 @@ cat([I|Is], Acc) ->
     cat(Is, [I|Acc]);
 cat([], Acc) ->
     Acc.
-
-new_label() ->
-    case get(next_label) of
-	undefined ->
-	    put(next_label, 1),
-	    "L0";
-	I ->
-	    put(next_label, I+1),
-	    [$L|integer_to_list(I)]
-    end.
 
 effect_all() ->
     Ls = 
@@ -1157,7 +1305,6 @@ generate_stack(_C,0,Acc) ->
 generate_stack(C, I,Acc) when I > 0 ->
     generate_stack(C+1,I-1,[list_to_atom([C]) | Acc]).
 
-
 exec([I|Is],Stack) ->
     exec(Is,exec_(I,Stack));
 exec([],Stack) ->
@@ -1189,7 +1336,6 @@ exec_('shift',[B,A|Xs])    -> [{'<<',A,B}|Xs];
 exec_(nop, Xs)         -> Xs;
 exec_({const,C},Xs) -> [C|Xs].
 
-
 %% depth calculate stack effect depth
 %% depth(Instruction) -> {Min depth before,  Min depth after}
 %%
@@ -1197,16 +1343,16 @@ minmax_depth(Is) ->
     Min0 = 3*length(Is),
     minmax_depth(Is, Min0, 0, 0).
 
-minmax_depth([I|Is], Min, Max, Level) ->
+minmax_depth([I|Is], Min, Max, Depth) ->
     {Before,After} = min_depth_(I),
     Effect = After - Before,
-    LevelBefore = Level - Before,
-    LevelAfter = Level - After,
-    Level1 = Level + Effect,
+    LevelBefore = Depth - Before,
+    LevelAfter = Depth - After,
+    Depth1 = Depth + Effect,
     minmax_depth(Is, 
 		 erlang:min(Min,LevelBefore),
 		 erlang:max(Max,LevelAfter),
-		 Level1);
+		 Depth1);
 minmax_depth([], Min, Max, Depth) ->
     {Min,Max,Depth}.
 

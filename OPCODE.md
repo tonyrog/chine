@@ -3,75 +3,99 @@
 ## opcode 00xxxxxx
 
     dup      0
-	rot      1
-	over     2
-	drop     3
-	swap     4
-	-        5
-	+        6
-	*        7
-	nop      8
-	and      9
-	or       10
-	xor      11
-	0=       12
-	0<       13
-	not      14
-	U/A      15       unassigned
-	negate   16
-	/        17       integer division
-	shift    18
-	!        19
-	@        20
-	>r       21
-	r>       22
-	r@       23
-	exit     24
-	sys      25
-	yield    26
-	[]       27
-	execute  28
-	fp@      29
-	fp!      30
-	sp@      31
-	sp!      32
+    rot      1
+    over     2
+    drop     3
+    swap     4
+    -        5
+    +        6
+    *        7
+    nop      8
+    and      9
+    or       10
+    xor      11
+    0=       12
+    0<       13
+    not      14
+    U/A      15		unassigned
+    negate   16
+    /        17		integer division
+    shift    18
+    !        19
+    @        20
+    >r       21
+    r>       22
+    r@       23
+    exit     24
+    sys      25
+    yield    26
+    []       27
+    execute  28
+    fp@      29
+    fp!      30
+    sp@      31
+    sp!      32
+    	     33-63	unassigned
 
 ## opcode 11xxxyyy
 
 Two of the first 0..7 opcodes can be packed into one byte.
 
     dup      0
-	rot      1
-	over     2
-	drop     3
-	swap     4
-	-        5
-	+        6
-	*        7
+    rot      1
+    over     2
+    drop     3
+    swap     4
+    -        5
+    +        6
+    *        7
 
 ## opcode 01eejjjj
 
 This group uses the two middle bits ee as a binary exponent
 to code number of bytes that follow the code code.
 
-    ee      0    1 byte signed argument length
-    ee      1    2 bytes signed argument (big endian)
-    ee      2    4 bytes signed argument (big endian)
+    ee      0    1 byte signed integer
+    ee      1    2 bytes signed (big endian)
+    ee      2    4 bytes signed (big endian)
     ee      3    unassigned
 
 The jjjj (jump) opcodes are
 
-	jmpz     0
-	jmpnz    1
-	next     2
-	jmplz    3
-	jmp      4
-	call     5
-	literal  6  <integer>
-	array    7  <length> <element1> .. <elementn>
-	arg      8  <index>
-	
+    jmpz     0  <offset>
+    jmpnz    1  <offset>
+    next     2  <offset>
+    jmplz    3  <offset>
+    jmp      4  <offset>
+    call     5  <offset>
+    literal  6  <integer>
+             7  unassigned
+    arg      8  <index>
+    array    9  <length> <satteeee> <align> <element1> .. <elementn>
+             10-15	unassigned
 
+## array encoding
+
+<length> is the length over all data associated with the array
+including the element-size-type byte and possible alignment pad.
+<sauteeee> 
+
+  eeee (element-size)
+    0 = 8-bit
+    1 = 16-bit
+    2 = 32-bit
+    3 = 64-bit
+    ...
+  s (signed flag)
+    0 = unsigned elements
+    1 = signed elements
+  a (aligned flag)
+  u (string/unicode flag)  
+  t (integer/float flag)
+    0 = INTEGER
+    1 = FLOAT
+    ...    
+    
 ## opcode 10aaajjj
 
 This group uses the three middle bits "aaa" as a

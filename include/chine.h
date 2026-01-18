@@ -35,8 +35,8 @@ extern "C" {
 #define FILE_VERSION_PATCH 0
 
 #define MAX_INPUT  32
-#define MAX_STACK  16  // stack + return stack
-#define MAX_MEM    16
+#define MAX_MEM    1024
+#define MAX_STACK  256  // stack + return stack
 #define MAX_TIMERS 16
 #define NUM_TBYTES  ((MAX_TIMERS+7)>>3)
 #define NUM_IBYTES  ((MAX_INPUT+7)>>3)
@@ -110,11 +110,13 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define OPSHFT 6
     
 // OPCODE0 00iiiiii 64 instruction opcode
+#define OP0INS  0x00    
 #define OP0MASK 0x3f
 #define OPCODE0(op)    (0x00 | ((op)&OP0MASK))
 
 // OPCODE1 01lljjjj 16 "jump" instructions with 2 bit length indicator
 // 0=8 bit, 1=16 bit, 2=32 bit (3 = yet unassigned)
+#define OP1INS   0x40
 #define OP1MASK  0x0f
 #define VAL1MASK 0x03
 #define VAL1SHFT 4
@@ -122,6 +124,7 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define OPCODE1(jop,l) (0x40|((jop)&OP1MASK)|(((l)&VAL1MASK)<<VAL1SHFT))
 
 // OPCODE2 10aaajjj 8 "jump" instructions with 3 bit signed integer argument
+#define OP2INS   0x80    
 #define OP2MASK  0x07
 #define VAL2MASK 0x07
 #define VAL2SHFT 3
@@ -129,6 +132,7 @@ static inline int32_t unpack_i32(uint8_t* ptr)
 #define OPCODE2(jop,a) (0x80|((jop)&OP2MASK)|(((a)&VAL2MASK)<<VAL2SHFT))
 
 // OPCODE3 11iiikkk 2x 8 bit packed instructions
+#define OP3INS  0xC0        
 #define OP3MASK 0x07
 #define OP3SHFT 3
 #define OPCODE3(op1,op2) (0xc0|((op1)&OP3MASK)|(((op2)&OP3MASK)<<OP3SHFT))
@@ -141,12 +145,12 @@ typedef enum {
     JMP     = 4,    // goto L
     CALL    = 5,    // call(L)
     LITERAL = 6,    // constant N
-    ARRAY   = 7,    // Array+String (of constants)
+    JOP_7   = 7,    // unassigned
     // OPCODE1 only
     ARG     = 8,
-    JOP_9   = 9,
-    JOP_10  = 10,
-    JOP_11  = 11,
+    ARRAY   = 9,    // Array+String (of constants)
+    FENTER  = 10,   // Setup call frame
+    FLEAVE  = 11,   // Remove call frame
     JOP_12  = 12,
     JOP_13  = 13,
     JOP_14  = 14,
@@ -175,8 +179,8 @@ typedef enum {
     NEGATE  = 16,       // negate: ( a -- (-a) )
     DIV     = 17,       // / ( a b -- (a/b) )
     SHFT    = 18,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
-    STORE   = 19,       // ! ( a i -- )
-    FETCH   = 20,       // @ ( i -- a )
+    STORE   = 19,       // ! ( n addr -- )
+    FETCH   = 20,       // @ ( addr -- n )
     TOR     = 21,       // >r ( n -- ) R: ( -- n )
     FROMR   = 22,       // r> R: ( n -- ) ( -- n )
     RFETCH  = 23,       // r@: R: ( n -- n ) ( -- n )
@@ -189,9 +193,10 @@ typedef enum {
     FPSTORE = 30,       // fp! ( fp -- )
     SPFETCH = 31,       // sp@ ( -- sp )
     SPSTORE = 32,       // sp! ( sp -- )
-    OP_33   = 33,
-    //...
-    OP_63   = 63
+    CSTORE  = 33,       // c!  ( b c-addr -- )
+    CFETCH  = 34,       // c@  ( c-addr -- b )
+    //... unassigned
+    SKIP    = 63        // used in dispatch of op3
 } opcode_t;
 
 #define ARG8(x)   U8((x))
@@ -248,9 +253,6 @@ typedef enum {
 // : u<=  2dup xor 0< if swap drop 0< else - 0<= then ;
 #define S_ULE S_2DUP, XOR, ZLT, JOP8(JMPZ,4),	\
 	OPOP(SWAP,DROP), ZLT, JOP8(JMP,6), SUB, S_ZLE
-
-#define FENTER FPFETCH, TOR, SPFETCH, FPSTORE
-#define FLEAVE FPFETCH, FROMR, FPSTORE, SPSTORE
 
 // Failure codes
 #define FAIL_INVALID_ARGUMENT       -1
@@ -316,6 +318,10 @@ typedef enum {
 #define INPUT_ANALOG  1
 #define INPUT_ENCODER 2
 
+#define U_MAX_VARS 8
+#define U_DP  0
+#define U_TIB 1
+    
 typedef struct _chine_t
 {
     uint8_t* cIP;
@@ -326,9 +332,9 @@ typedef struct _chine_t
     int (*sys)(struct _chine_t* mp,
 	       cell_t sysop, cell_t* revarg,
 	       cell_t* npop, cell_t* reason);
-    uint8_t* prog;                // program area
-    cell_t   stack[MAX_STACK];    // stack
-    cell_t   mem[MAX_MEM];        // local store
+    uint8_t* prog;                    // program area
+    cell_t*  stack;                   // stack point into memory
+    cell_t   mem[MAX_MEM+MAX_STACK];  // memory and stack
     uint8_t  imask[NUM_IBYTES];   // input mask
     uint8_t  tbits[NUM_TBYTES];   // timer running bits
     uint8_t  tmask[NUM_TBYTES];   // selected timers
@@ -336,21 +342,48 @@ typedef struct _chine_t
 } chine_t;
 
 // get argument
-// opcode1: I = 01llxxxx
-// opcode2: I = 10aaaxxx aaa is signed 3-bit argument
-//
-static CHINE_INLINE int get_arg_len(uint8_t I)
+// op2: I = 10aaaxxx   0 ( aaa is signed 3-bit argument )
+// op1: I = 01llxxxx   ll=0,1,2,3 => 1,2,4,8
+
+static CHINE_INLINE uint8_t get_op1_len(uint8_t I)
+{
+    return (1 << OP1VAL(I));
+}
+
+static CHINE_INLINE uint8_t get_arg_len(uint8_t I)
 {
     if ((I >> OPSHFT) == OP2)
 	return 0;
     else
-	return (1 << OP1VAL(I));
+	return get_op1_len(I);
 }
+
+static CHINE_INLINE int get_signed(uint8_t L, uint8_t I, uint8_t* ptr)
+{
+    switch(L) {
+    case 0: return OP2VAL(I);
+    case 1: return INT8(ptr);
+    case 2: return INT16(ptr);
+    case 4: return INT32(ptr);
+    default: return 0;  // error!
+    }
+}
+
+static CHINE_INLINE unsigned get_unsigned(uint8_t L, uint8_t I, uint8_t* ptr)
+{
+    switch(L) {
+    case 0: return OP2VAL(I);
+    case 1: return UINT8(ptr);
+    case 2: return UINT16(ptr);
+    case 4: return UINT32(ptr);
+    default: return 0; // error!
+    }
+}
+
 
 static CHINE_INLINE cell_t load_arg(uint8_t I, uint8_t* ptr)
 {
-    if ((I >> OPSHFT) == OP2)
-	return OP2VAL(I);
+    if ((I >> OPSHFT) == OP2) return OP2VAL(I);
     switch(OP1VAL(I)) {
     case 0: return INT8(ptr);
     case 1: return INT16(ptr);
@@ -359,26 +392,10 @@ static CHINE_INLINE cell_t load_arg(uint8_t I, uint8_t* ptr)
     }
 }
 
-static CHINE_INLINE int get_arg(uint8_t I, uint8_t* ptr, cell_t* argp)
-{
-    if ((I >> OPSHFT) == OP2) { // extract 3 bit signed number
-	*argp = OP2VAL(I);
-	return 0;
-    }
-    else {  // opcode1
-	switch(OP1VAL(I)) {
-	case 0:  *argp=INT8(ptr);   return 1;
-	case 1:  *argp=INT16(ptr);  return 2;
-	case 2:  *argp=INT32(ptr);  return 4;
-	default: *argp=0; return 0;
-	}
-    }
-}
-
 // Get number of bytes of of array length
-// opcode2: I = 10|lll|111  => 0
-// opcode1: I = 01|0-|0111  => 1
-// opcode1: I = 01|1-|0111  => 2
+// op2: I = 10|lll|111  => 0
+// op1: I = 01|0-|0111  => 1
+// op1: I = 01|1-|0111  => 2
 static CHINE_INLINE int get_array_hlen(uint8_t I)
 {
     uint8_t H = (I >> 5) & 3;
@@ -387,11 +404,12 @@ static CHINE_INLINE int get_array_hlen(uint8_t I)
 
 static CHINE_INLINE int get_array_len(uint8_t I, uint8_t* ptr, cell_t* argp)
 {
-    switch(get_array_hlen(I)) {
+    switch(get_arg_len(I)) {    
     case 0: *argp = (I>>VAL2SHFT) & VAL2MASK; return 0;
     case 1: *argp = UINT8(ptr);  return 1;
     case 2: *argp = UINT16(ptr); return 2;
-    default: return 0;
+    case 3: *argp = UINT32(ptr); return 4;	
+    default: *argp = 0; return 4;
     }
 }
 
@@ -400,7 +418,7 @@ static CHINE_INLINE int get_array_len(uint8_t I, uint8_t* ptr, cell_t* argp)
 // 01|00|0111  => 1
 // 01|01|0111  => 2
 // 01|10|0111  => 4
-// 01|11|0111  => 8 but is undefined right now!
+// 01|11|0111  => 8 (not used right now)
 
 static CHINE_INLINE int get_element_len(uint8_t I)
 {

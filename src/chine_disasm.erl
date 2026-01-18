@@ -44,10 +44,6 @@ dis_code([_|Sections], Addr1, SymTab, Code1) ->
 dis_code([], Addr1, SymTab, Code) ->
     {Addr1,lists:reverse(Code),SymTab}.
 
--define(ARRAY, 7).
--define(SYS, 25).
-
-
 dis_opcodes(<<>>, Addr, _SymTab, Code) ->
     {Addr, Code};
 dis_opcodes(<<0:2, ?SYS:6, Sys:8, Content/binary>>, Addr, SymTab, Code) ->
@@ -132,33 +128,23 @@ dis_opcodes(<<0:2, OP:6, Content/binary>>, Addr, SymTab, Code) ->
 	      #opcode.'fp!' -> 'fp!';
 	      #opcode.'sp@' -> 'sp@';
 	      #opcode.'sp!' -> 'sp!';
-	      _ -> {{unknown,OP}}
+	      #opcode.'c!' -> 'c!';
+	      #opcode.'c@' -> 'c@';
+	      _ -> {op0,{unknown,OP}}
 	  end,
     dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
 
-dis_opcodes(<<1:2, L:2, ?ARRAY:4, Content/binary>>, Addr, SymTab, Code) ->
-    {M,E,Variant} =
-	case L of
-	    0 -> {3, 3, uint8x8};
-	    1 -> {3, 4, uint8x16};
-	    2 -> {4, 5, uint16x32};
-	    3 -> {4, 6, uint16x64}
-	end,
-    EL = (1 bsl E), %% 8,16,32,64
-    LL = (1 bsl M), %% 8,8,16,16
-    <<Len:LL, Data:(Len*(EL div 8))/binary, Content1/binary>> = Content,
-    Array = [Ei || <<Ei:EL>> <= Data],
-    Op = {array,{Variant,Len},Array},
-    dis_opcodes(Content1, Addr+1+L+Len*LL, SymTab, [Op|Code]);
-
-dis_opcodes(<<1:2, L:2, JOP:4, A:(1 bsl L)/signed-unit:8, Content/binary>>,
+dis_opcodes(<<1:2, EE:2, ?ARRAY:4, Content/binary>>, Addr, SymTab, Code) ->
+    {Op, Size, Content1} = dis_array(EE, Content),
+    dis_opcodes(Content1, Addr+1+Size, SymTab, [Op|Code]);
+dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/signed-unit:8, Content/binary>>,
 	    Addr, SymTab, Code) ->
-    {Int,UInt} = case L of
-		     0 -> {int8,uint8};
-		     1 -> {int16,uint16};
-		     2 -> {int32,uint32};
-		     3 -> {int64,uint64}
-		 end,
+    Int = case EE of
+	      0 -> int8;
+	      1 -> int16;
+	      2 -> int32;
+	      3 -> int64
+	  end,
     OpA = case JOP+2 of
 	      #jopcode.jmpz -> {jmpz,{Int,A}};
 	      #jopcode.jmpnz -> {jmpnz,{Int,A}};
@@ -167,17 +153,14 @@ dis_opcodes(<<1:2, L:2, JOP:4, A:(1 bsl L)/signed-unit:8, Content/binary>>,
 	      #jopcode.jmp   -> {jmp,{Int,A}};
 	      #jopcode.call  -> {call,{Int,A}};
 	      #jopcode.literal -> {literal,{Int,A}};
-	      #jopcode.array   -> {array,{UInt,unsigned(UInt,A)}};
 	      #jopcode.arg     -> {arg,{Int,A}};
-	      _ -> {{unknown,JOP},{Int,A}}
+	      #jopcode.fenter  -> {fenter,{Int,A}};
+	      #jopcode.fleave  -> 
+		  R = A band 16#f,
+		  {fleave,{Int,{A bsr 8, R}}};
+	      _ -> {op1,{unknown,JOP}}
 	  end,
-    dis_opcodes(Content, Addr+1+(1 bsl L), SymTab, [OpA|Code]);
-
-dis_opcodes(<<2:2, L:3, ?ARRAY:3, String:L/binary, Content/binary>>,
-	    Addr, SymTab, Code) ->
-    %% uint3x8  0-7 8 bit characters
-    Op = {array,{uint3x8,L},String},
-    dis_opcodes(Content, Addr+1+L, SymTab, [Op|Code]);
+    dis_opcodes(Content, Addr+1+(1 bsl EE), SymTab, [OpA|Code]);
 
 dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>, 
 	    Addr, SymTab, Code) ->
@@ -188,8 +171,8 @@ dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>,
 	      #jopcode.jmplz -> {jmplz,{int3,A}};
 	      #jopcode.jmp   -> {jmp,{int3,A}};
 	      #jopcode.call  -> {call,{int3,A}};
-	      #jopcode.literal -> {literal,{int3,A}}
-	      %%#jopcode.array   -> {array,{uint3,unsigned(uint3,A)}}
+	      #jopcode.literal -> {literal,{int3,A}};
+	      _ -> {op2, {unknown,JOP}}
 	  end,
     dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
 
@@ -216,12 +199,30 @@ dis_opcodes(<<3:2, OP2:3, OP1:3, Content/binary>>, Addr, SymTab, Code) ->
 	  end,
     dis_opcodes(Content, Addr+1, SymTab, [{OpA,OpB}|Code]).
 
-unsigned(uint3, V) when V < 0 -> V+(1 bsl 3);
-unsigned(uint8, V) when V < 0 -> V+(1 bsl 8);
-unsigned(uint16, V) when V < 0 -> V+(1 bsl 16);
-unsigned(uint32, V) when V < 0 -> V+(1 bsl 32);
-unsigned(_, V) when V >= 0 -> V.
+dis_array(0, <<Size:8, Array:Size/binary, Tail/binary>>) ->
+    io:format("0: size=~w, array=~w\n", [Size, Array]),
+    {dis_arr(Array), Size+1, Tail};
+dis_array(2, <<Size:16, Array:Size/binary, Tail/binary>>) ->
+    {dis_arr(Array), Size+1, Tail};
+dis_array(3, <<Size:32, Array:Size/binary, Tail/binary>>) ->
+    {dis_arr(Array), Size+1, Tail}.
 
+dis_arr(<<EType:8, Binary/binary>>) ->
+    EEEE = EType band 16#0f,
+    L = 8 bsl EEEE,
+    T = if EType band 16#10 =:= 16#10 -> {float,L};
+	   EType band 16#80 =:= 16#80 -> {int,L};
+	   true -> {uint,L}
+	end,
+    {array, T, dis_array_elements(T, Binary)}.
+
+dis_array_elements({int,Size}, Binary) ->
+    [I || <<I:Size/signed>> <= Binary];
+dis_array_elements({uint,Size}, Binary) ->
+    [I || <<I:Size/unsigned>> <= Binary];
+dis_array_elements({float,Size}, Binary) ->
+    [F || <<F:Size/float>> <= Binary].
+    
 %% collect all symbols (and merge)
 dis_symb([{<<"SYMB">>, Table} | Sections], Symb0) ->
     Symb1 = maps:from_list(

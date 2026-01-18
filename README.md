@@ -6,6 +6,12 @@ of architectures.
 
 ## INSTRUCTIONS op3/op6
 
+stack effect diagram works like before -- after
+the right most element is top of the stack
+so in rot ( a b c -- b c a ) then c is top of the
+stack before rot and a is top of stack after rot
+
+
 | opname    |  stack effect        | comment       |
 |-----------|----------------------|---------------|
 | dup       | ( a -- a a )         |
@@ -40,6 +46,8 @@ of architectures.
 | fp!       | ( fp -- )    | set frame pointer
 | sp@       | ( -- sp )    | fetch stack pointer
 | sp!       | ( sp -- )    | set stack pointer
+| c!        | ( n i -- ) | ((byte*)mem)[i] = n |
+| c@        | ( i -- n ) | n = ((byte*)mem)[i] |
 
 ## INSTRUCTIONS jop
 
@@ -113,9 +121,6 @@ Extended instructions
 
 	: jmp* ( caddr -- ) >r exit ;
 	
-	: fenter ( -- ) fp@ >r sp@ fp! ;
-	: fleave ( -- ) fp@ r> fp! sp! ;
-	  
 ## non branch alternatives ( mostly for fun )
 
     : min ( a b -- [ min(a,b) ]
@@ -195,6 +200,73 @@ top is to the right, the order it is typed in.
 | file\_close     | ( fd -- t | err f ) | |
 | file\_seek      | ( fd offset whence -- offs t | err f ) | |
 
+# Compact instructions
+
+    [dup,dup] : ( [a] -- [a,a,a] )
+    [dup,rot] : ( [a,b] -- [b,b,a] )
+    [dup,over] ( multiple ) ( [a] -- [a,a,a] )
+    [dup,drop] = id
+    [dup,swap] : ( [a] -- [a,a] )
+    [dup,'-'] : ( [a] -- [{const,0}] )
+    [dup,'+'] : ( [a] -- [{'+',a,a}] )
+    [dup,'*'] : ( [a] -- [{'*',a,a}] )
+    [rot,dup] : ( [a,b,c] -- [b,c,a,a] )
+    [rot,rot] : ( [a,b,c] -- [c,a,b] )
+    [rot,over] : ( [a,b,c] -- [b,c,a,c] )
+    [rot,drop] : ( [a,b,c] -- [b,c] )
+    [rot,swap] : ( [a,b,c] -- [b,a,c] )
+    [rot,'-'] : ( [a,b,c] -- [b,{'-',c,a}] )
+    [rot,'+'] : ( [a,b,c] -- [b,{'+',c,a}] )
+    [rot,'*'] : ( [a,b,c] -- [b,{'*',c,a}] )
+    [over,dup] : ( [a,b] -- [a,b,a,a] )
+    [over,rot] : ( [a,b] -- [b,a,a] )
+    [over,over] : ( [a,b] -- [a,b,a,b] )
+    [over,drop] = id
+    [over,swap] : ( [a,b] -- [a,a,b] )
+    [over,'-'] : ( [a,b] -- [a,{'-',b,a}] )
+    [over,'+'] : ( [a,b] -- [a,{'+',b,a}] )
+    [over,'*'] : ( [a,b] -- [a,{'*',b,a}] )
+    [drop,dup] : ( [a,b] -- [a,a] )
+    [drop,rot] : ( [a,b,c,d] -- [b,c,a] )
+    [drop,over] : ( [a,b,c] -- [a,b,a] )
+    [drop,drop] : ( [a,b] -- [] )
+    [drop,swap] : ( [a,b,c] -- [b,a] )
+    [drop,'-'] : ( [a,b,c] -- [{'-',a,b}] )
+    [drop,'+'] : ( [a,b,c] -- [{'+',a,b}] )
+    [drop,'*'] : ( [a,b,c] -- [{'*',a,b}] )
+    [swap,dup] ( multiple ) ( [a,b] -- [b,a,a] )
+    [swap,rot] : ( [a,b,c] -- [c,b,a] )
+    [swap,over] : ( [a,b] -- [b,a,b] )
+    [swap,drop] : ( [a,b] -- [b] )
+    [swap,swap] = id
+    [swap,'-'] : ( [a,b] -- [{'-',b,a}] )
+    [swap,'+'] : ( [a,b] -- [{'+',b,a}] )
+    [swap,'*'] : ( [a,b] -- [{'*',b,a}] )
+    ['-',dup] : ( [a,b] -- [{'-',a,b},{'-',a,b}] )
+    ['-',rot] : ( [a,b,c,d] -- [b,{'-',c,d},a] )
+    ['-',over] : ( [a,b,c] -- [a,{'-',b,c},a] )
+    ['-',drop] ( multiple ) ( [a,b] -- [] )
+    ['-',swap] : ( [a,b,c] -- [{'-',b,c},a] )
+    ['-','-'] : ( [a,b,c] -- [{'-',a,{'-',b,c}}] )
+    ['-','+'] : ( [a,b,c] -- [{'+',a,{'-',b,c}}] )
+    ['-','*'] : ( [a,b,c] -- [{'*',a,{'-',b,c}}] )
+    ['+',dup] : ( [a,b] -- [{'+',a,b},{'+',a,b}] )
+    ['+',rot] : ( [a,b,c,d] -- [b,{'+',c,d},a] )
+    ['+',over] : ( [a,b,c] -- [a,{'+',b,c},a] )
+    ['+',drop] ( multiple ) ( [a,b] -- [] )
+    ['+',swap] : ( [a,b,c] -- [{'+',b,c},a] )
+    ['+','-'] : ( [a,b,c] -- [{'-',a,{'+',b,c}}] )
+    ['+','+'] : ( [a,b,c] -- [{'+',a,{'+',b,c}}] )
+    ['+','*'] : ( [a,b,c] -- [{'*',a,{'+',b,c}}] )
+    ['*',dup] : ( [a,b] -- [{'*',a,b},{'*',a,b}] )
+    ['*',rot] : ( [a,b,c,d] -- [b,{'*',c,d},a] )
+    ['*',over] : ( [a,b,c] -- [a,{'*',b,c},a] )
+    ['*',drop] ( multiple ) ( [a,b] -- [] )
+    ['*',swap] : ( [a,b,c] -- [{'*',b,c},a] )
+    ['*','-'] : ( [a,b,c] -- [{'-',a,{'*',b,c}}] )
+    ['*','+'] : ( [a,b,c] -- [{'+',a,{'*',b,c}}] )
+    ['*','*'] : ( [a,b,c] -- [{'*',a,{'*',b,c}}] )
+
 # Source format
 
 The source format for chine code is currently in form of
@@ -213,7 +285,7 @@ Symbols may be introduced with
     {enum, ["Sym1", "Sym2" ... "SymN" ]}
 
 This enumerates the symbols to values 0 ... N-1, later use
-of {const,"Sym1"} will have the same effect as enter {const,0}.
+of {const,"Sym1"} will have the same effect as {const,0}.
 
     {label, L}
 
@@ -259,9 +331,9 @@ result is none zero the Loop is executed and the loop restarts.
 
     {'for',Loop}
 
-For implements a finte loop where the loop count is expeced on the
+'for' implements a finte loop where the loop count is expeced on the
 stack on entry. The loop index is counted downward towards zero and
-may be fetched during the loop with 'r@'.
+may be fetched during the loop using 'r@'.
 
 ## Arrays
 
@@ -271,7 +343,7 @@ Arrays can be used to access data more efficent, like
 
 Is a small array of prime numbers. The array construct compiles inline
 and push the array pointer onto the stack, there is no penalty to
-loop over a array construct, just a pointer being pushed and
+loop over an array construct, just a pointer being pushed and
 the array data being skipped. So a loop over an array construct is
 perfectly ok.
 To access an item in the array the '[]' operation is used. Note that
@@ -287,12 +359,57 @@ To jump to the code and the label Li
 
 	i-1, '[]', 'jmp*'
 
-On the other hand if the array is an array of labels to functions
-then the 'execute' operation is used and control is being return after
+if the array is an array of labels to functions
+then the 'execute' operation may be used. Control is being return after
 function is done executing.
 
     i-1, '[]', execute
-	
+
+## Call frames (fenter/fleave)
+
+When call frames are need, you are being lazy, or want to play
+it safe then use fenter and fleave to avoid stack accounting.
+
+        fenter <nlocals>
+
+given a stack frame looking like (growing upwards!)
+
+	sp -> | 3 |
+	      | 2 |
+	      | 1 |
+	      | a |
+	      | b |
+        fp -> | x |
+	      | y |
+
+using fenter 4 will: them calculate of value 8 and 9
+
+        rp: ( -- fp )          fp is save on return stack
+
+       sp'' -> [ 9 ] ret 2
+        sp' -> [ 8 | ret 1
+	       [ 0 ] {arg,-4}  forth local
+	       [ 0 ] {arg,-3}  third local
+	       [ 0 ] {arg,-2}  second local
+               [ 0 ] {arg,-1}  first local
+     fp'=sp -> | 3 | {arg,0}
+	       | 2 | {arg,1}
+	       | 1 | {arg,2}
+               | a |
+	       | b |
+        fp ->  | x |
+	       | y |	       
+
+fleave 2,3 will remove call frame and copy the return value(s) to
+the previous call frame outputs:
+
+        fp' -> [ 3 ]    (just show where the fp' was)
+         sp -> | 9 |
+	       | 8 |
+               | a |
+	       | b |
+        fp ->  | x |
+	       | y |
 
 ## Binary format
 

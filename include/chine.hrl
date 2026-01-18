@@ -9,7 +9,7 @@
 %% A is a 3 bit signed integer
 -define(OPCODE2(JOP,A),  <<2:2, (A):3, (JOP):3>>).
 %% Combine opcode1 and opcode2 (in range 0..7) into one byte
--define(OPCODE3(OP1,OP2), <<3:2, (OP2):3, (OP1):3>>).
+-define(OPCODE3(OP2,OP1), <<3:2, (OP2):3, (OP1):3>>).
 
 -define(CHINE_TRUE, -1).
 -define(CHINE_FALSE, 0).
@@ -17,17 +17,27 @@
 -record(jopcode, 
 	{
 	 %% OPCODE1 and OPCODE2
-	 jmpz,     %% (TOP == 0)
-	 jmpnz,    %% (TOP != 0)
+	 jmpz,     %% (TOS == 0)
+	 jmpnz,    %% (TOS != 0)
 	 next,     %% (--RP[0]<0) 
-	 jmplz,    %% (TOP < 0)
+	 jmplz,    %% (TOS < 0)
 	 jmp,
 	 call,
 	 literal,
-	 array,
+	 jop_7,
 	 %% OPCODE1 only
-	 arg
+	 arg,     %% 8
+	 array,   %% 9
+	 fenter,  %% 10
+	 fleave,  %% 11
+	 jop_12,
+	 jop_13,
+	 jop_14,
+	 jop_15
 	}).
+
+-define(ARRAY, 9).
+
 
 -define(JOP(X), (#jopcode.X-2)).
 -define(JENUM(X), X => (#jopcode.X-2)).
@@ -60,17 +70,21 @@
 	 'r>',
 	 'r@',
 	 exit,
-	 sys,
+	 sys,    %% 25
 	 yield,
 	 '[]',
 	 execute,
 	 'fp@',
 	 'fp!',
 	 'sp@',
-	 'sp!'
+	 'sp!',
+	 'c!',
+	 'c@'
 	}).
 -define(OP(X), ((#opcode.X)-2)).
 -define(ENUM(X), X => ((#opcode.X)-2)).
+
+-define(SYS, 25).
 
 
 %% Failure codes
