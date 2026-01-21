@@ -1,0 +1,35 @@
+%% -*- erlang -*-
+%% test functions with two return values
+{export, run}.
+
+{function, [], run, [], [],
+ [
+  {call, f0, []}, drop, drop,
+  {call, f1, [10]}, drop, drop,
+  {call, f2, [100,31]}, drop, drop,
+  {call, f3, [101,31,39]}, drop, drop
+ ]}.
+
+{function, [int,int], f0, [], [],
+ [
+  5, 7
+ ]}.
+
+{function, [int,int], f1, [x1], [],
+ [
+  {op, '/', [x1,2]},
+  {op, 'mod', [x1,2]}
+ ]}.
+
+{function, [int,int], f2, [x1,x2], [],
+ [
+  {op, '/', [x1,x2]},
+  {op, 'mod', [x1,x2]}
+ ]}.
+
+{function, [int,int], f3, [x1,x2,x3], [],
+ [
+  {op, '/', x1,x2},
+  {op, 'mod', x1,x3}
+ ]}.
+

@@ -8,6 +8,8 @@
 -module(chine_disasm).
 
 -export([file/1]).
+-export([show/1]).
+
 
 -include("../include/chine.hrl").
 
@@ -18,6 +20,82 @@ file(File) ->
 	Error ->
 	    Error
     end.
+
+show(File) ->
+    case file:read_file(File) of
+	{ok,Bin} ->
+	    {Size,CodeSections,SymTab} = dis(Bin), 
+	    show_(CodeSections, SymTab),
+	    {ok, Size};
+	Error ->
+	    Error
+    end.
+
+show_([{_Addr0,_Addr1,Content,Code}|Sections],SymTab) ->
+    show__(Code, Content, SymTab),
+    show_(Sections, SymTab);
+show_([], _SymTab) ->
+    ok.
+
+show__([{Addr,Len,{call,{Type,Offset}}}|Code],Content,SymTab) ->
+    <<Data:Len/binary, Content1/binary>> = Content,
+    Target = Addr+Len+Offset,
+    Op = case maps:find(Target, SymTab) of    
+	     {ok, Name} -> {call, unicode:characters_to_list(Name)};
+	     error -> {call,{Type,Offset}}
+	 end,
+    show_op(Addr, Op, Data, SymTab),
+    show__(Code, Content1, SymTab);
+show__([{Addr,Len,Op}|Code], Content, SymTab) ->
+    <<Data:Len/binary, Content1/binary>> = Content,
+    show_op(Addr, Op, Data, SymTab),
+    show__(Code, Content1, SymTab);
+show__([], _Content,  _) ->
+    ok.
+
+show_op(Addr, Op, Data, SymTab) ->
+    case maps:find(Addr, SymTab) of
+	{ok,Label} ->
+	    io:format("~s:\n", [Label]);
+	error -> 
+	    ok
+    end,
+    Hex0 = format_hex(Data),
+    Len = length(Hex0),
+    if Len > 8 ->
+	    {Hex1,HexR} = lists:split(8, Hex0),
+	    io:format("~04w: ~-24s ", [Addr,Hex1]),
+	    show_opcode(Op),
+	    show_hex(Addr+8, HexR);
+       true ->
+	    io:format("~04w: ~-24s ", [Addr,Hex0]),
+	    show_opcode(Op)
+    end.
+
+show_opcode(Op) ->
+    case Op of
+	{call,_} ->
+	    io:format("~p\n", [Op]);
+	_ ->
+	    io:format("~w\n", [Op])
+    end.
+
+show_hex(Addr, Hex0) ->
+    Len = length(Hex0),
+    if Len =:= 0 ->
+	    ok;
+       Len > 8 ->
+	    {Hex1,HexR} = lists:split(8, Hex0),
+	    io:format("~04w: ~-24s\n", [Addr,Hex1]),
+	    show_hex(Addr+8, HexR);
+       true ->
+	    io:format("~04w: ~-24s\n", [Addr,Hex0])
+    end.
+    
+format_hex(Bin) ->
+    [[hex(H),hex(L),$\s] || <<H:4,L:4>> <= Bin].
+
+hex(X) -> element(X+1,{$0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$a,$b,$c,$d,$e,$f}).
 
 dis(<<"CHIN", FileVersion:32, FileCRC:32, 
       SectionsLength:32, Sections:SectionsLength/binary, _Trail/binary>>) ->
@@ -37,15 +115,15 @@ dis_sections(Sections) ->
     dis_code(Sections, 0, SymTab, []).
 
 dis_code([{<<"CODE">>, Content} | Sections], Addr, SymTab, Code0) ->
-    {Addr1,Code1} = dis_opcodes(Content, Addr, SymTab, Code0),
-    dis_code(Sections, Addr1, SymTab, Code1);
+    {Addr1,Code1} = dis_opcodes(Content, Addr, SymTab, []),
+    dis_code(Sections, Addr1, SymTab, [{Addr,Addr1,Content,Code1}|Code0]);
 dis_code([_|Sections], Addr1, SymTab, Code1) ->
     dis_code(Sections, Addr1, SymTab, Code1);
 dis_code([], Addr1, SymTab, Code) ->
     {Addr1,lists:reverse(Code),SymTab}.
 
 dis_opcodes(<<>>, Addr, _SymTab, Code) ->
-    {Addr, Code};
+    {Addr, lists:reverse(Code)};
 dis_opcodes(<<0:2, ?SYS:6, Sys:8, Content/binary>>, Addr, SymTab, Code) ->
     OpA =
 	case Sys+2 of
@@ -92,7 +170,8 @@ dis_opcodes(<<0:2, ?SYS:6, Sys:8, Content/binary>>, Addr, SymTab, Code) ->
 	    #sys.sys_file_close -> {sys, file_close};
 	    _ -> {sys,{unknown, Sys}}
 	end,
-    dis_opcodes(Content, Addr+2, SymTab, [OpA|Code]);    
+    Len = 2,
+    dis_opcodes(Content, Addr+Len, SymTab, [{Addr,Len,OpA}|Code]);    
 dis_opcodes(<<0:2, OP:6, Content/binary>>, Addr, SymTab, Code) ->
     OpA = case OP+2 of
 	      #opcode.dup -> dup;
@@ -130,13 +209,15 @@ dis_opcodes(<<0:2, OP:6, Content/binary>>, Addr, SymTab, Code) ->
 	      #opcode.'sp!' -> 'sp!';
 	      #opcode.'c!' -> 'c!';
 	      #opcode.'c@' -> 'c@';
+	      #opcode.size -> size;
 	      _ -> {op0,{unknown,OP}}
 	  end,
-    dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
-
+    Len = 1,
+    dis_opcodes(Content, Addr+Len, SymTab, [{Addr,Len,OpA}|Code]);
 dis_opcodes(<<1:2, EE:2, ?ARRAY:4, Content/binary>>, Addr, SymTab, Code) ->
     {Op, Size, Content1} = dis_array(EE, Content),
-    dis_opcodes(Content1, Addr+1+Size, SymTab, [Op|Code]);
+    Len = 1+Size,
+    dis_opcodes(Content1, Addr+Len, SymTab, [{Addr,Len,Op}|Code]);
 dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/signed-unit:8, Content/binary>>,
 	    Addr, SymTab, Code) ->
     Int = case EE of
@@ -154,13 +235,20 @@ dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/signed-unit:8, Content/binary>>,
 	      #jopcode.call  -> {call,{Int,A}};
 	      #jopcode.literal -> {literal,{Int,A}};
 	      #jopcode.arg     -> {arg,{Int,A}};
-	      #jopcode.fenter  -> {fenter,{Int,A}};
+	      #jopcode.fenter  ->
+		  L = A band 16#ffff,
+		  N = A bsr 16,
+		  {fenter,{Int,{N,L}}};
 	      #jopcode.fleave  -> 
 		  R = A band 16#f,
-		  {fleave,{Int,{A bsr 8, R}}};
+		  N = A bsr 4,
+		  {fleave,{Int,{N,R}}};
+	      #jopcode.fset -> 
+		  {fset,{Int,A}};
 	      _ -> {op1,{unknown,JOP}}
 	  end,
-    dis_opcodes(Content, Addr+1+(1 bsl EE), SymTab, [OpA|Code]);
+    Len = 1+(1 bsl EE),
+    dis_opcodes(Content, Addr+Len, SymTab, [{Addr,Len,OpA}|Code]);
 
 dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>, 
 	    Addr, SymTab, Code) ->
@@ -174,7 +262,8 @@ dis_opcodes(<<2:2, A:3/signed, JOP:3, Content/binary>>,
 	      #jopcode.literal -> {literal,{int3,A}};
 	      _ -> {op2, {unknown,JOP}}
 	  end,
-    dis_opcodes(Content, Addr+1, SymTab, [OpA|Code]);
+    Len = 1,
+    dis_opcodes(Content, Addr+Len, SymTab, [{Addr,Len,OpA}|Code]);
 
 dis_opcodes(<<3:2, OP2:3, OP1:3, Content/binary>>, Addr, SymTab, Code) ->
     OpA = case OP1+2 of
@@ -197,15 +286,17 @@ dis_opcodes(<<3:2, OP2:3, OP1:3, Content/binary>>, Addr, SymTab, Code) ->
 	      #opcode.'+' -> '+';
 	      #opcode.'*' -> '*'
 	  end,
-    dis_opcodes(Content, Addr+1, SymTab, [{OpA,OpB}|Code]).
+    Len = 1,
+    dis_opcodes(Content, Addr+Len, SymTab, [{Addr,Len,{OpA,OpB}}|Code]).
 
 dis_array(0, <<Size:8, Array:Size/binary, Tail/binary>>) ->
-    io:format("0: size=~w, array=~w\n", [Size, Array]),
     {dis_arr(Array), Size+1, Tail};
-dis_array(2, <<Size:16, Array:Size/binary, Tail/binary>>) ->
+dis_array(1, <<Size:16, Array:Size/binary, Tail/binary>>) ->
     {dis_arr(Array), Size+1, Tail};
-dis_array(3, <<Size:32, Array:Size/binary, Tail/binary>>) ->
+dis_array(2, <<Size:32, Array:Size/binary, Tail/binary>>) ->
     {dis_arr(Array), Size+1, Tail}.
+%% dis_array(3, <<Size:64, Array:Size/binary, Tail/binary>>) ->
+%%    {dis_arr(Array), Size+1, Tail}.
 
 dis_arr(<<EType:8, Binary/binary>>) ->
     EEEE = EType band 16#0f,
@@ -224,9 +315,11 @@ dis_array_elements({float,Size}, Binary) ->
     [F || <<F:Size/float>> <= Binary].
     
 %% collect all symbols (and merge)
+%% currently the symbols are export entries
+%% so return them as Addr => Name!
 dis_symb([{<<"SYMB">>, Table} | Sections], Symb0) ->
     Symb1 = maps:from_list(
-	      [{Sym,Value} || 
+	      [{Value,Sym} || 
 		  <<SymLen:8, Sym:SymLen/binary,
 		    ValLen:8, Value:ValLen/signed-unit:8>> <= Table]),
     dis_symb(Sections, maps:merge(Symb0, Symb1));
@@ -234,7 +327,4 @@ dis_symb([_ | Sections], Symb) ->
     dis_symb(Sections, Symb);
 dis_symb([], Symb) ->
     Symb.
-
-
-    
     

@@ -8,17 +8,17 @@
 -module(chine).
 
 -export([start/0, start/1]).
-
 -export([effect/1, minmax_depth/1]).
 -export([print_stack_effect/2]).
--export([opcodes/0, jopcodes/0, syscalls/0, synthetic_opcodes/0]).
--export([new_label/0, add_enums/2, normalize_label/1]).
--export([expand_synthetic/2]).
+-export([opcodes/0, jopcodes/0, syscalls/0, sys_opcodes/0]).
+-export([opcode_type/1, opcode_type/2]).
 -export([asm_list/2]).
 -export([options/0]).
 -export([effect_all/0]).
 
+-export([encode_const/2]).
 -export([encode_array/2]).
+-export([nbits/1]).
 
 -include("../include/chine.hrl").
 
@@ -49,6 +49,13 @@ options() ->
 	 type => boolean,
 	 default => false,
 	 description => "Show debug information"},
+
+      #{ key => disasm,
+	 long => "disasm",
+	 short => "D",
+	 type => boolean,
+	 default => false,
+	 description => "Emit disassembly information"},
 
      #{ key => execute,
 	long => "execute",
@@ -120,23 +127,27 @@ do_version() ->
     end.
 
 do_input([Filename], Opts) ->
-    case file:consult(Filename) of
-	{ok,Ls0} ->
-	    Ls = lists:flatten(Ls0),
-	    case filename:extension(Filename) of
-		".ch" ->
-		    try asm_list(Ls,Opts) of
-			AsmResult ->
-			    do_emit(AsmResult, Opts)
-		    catch
-			?EXCEPTION(error,Reason,StackTrace) ->
-			    io:format(standard_error, "~s:error: ~p\n~p", 
-				      [?PROG, Reason,
-				       ?GET_STACK(StackTrace)
-				      ]),
-			    halt(1)
-		    end;
-		".chi" ->
+    Ext = filename:extension(Filename),
+    if Ext =:= ".x" ->
+	    case chine_opt:value(disasm,Opts) of
+		true ->
+		    chine_disasm:show(Filename);
+		false ->
+		    ok
+	    end;
+       true ->
+	    do_assemble(Filename, Opts)
+    end;
+do_input([], _Opts) ->
+    io:format("~s:error: missing input file\n", [?PROG]),
+    halt(1).
+
+
+do_assemble(Filename, Opts) ->
+    Ext = filename:extension(Filename),
+    if Ext =:= ".ch"; Ext =:= ".chi" ->
+	    case file:consult(Filename) of
+		{ok,Ls} ->
 		    try chi:module(Ls) of
 			{Asm, _} ->
 			    try asm_list(Asm,Opts) of
@@ -157,18 +168,40 @@ do_input([Filename], Opts) ->
 				       ?GET_STACK(StackTrace)
 				      ]),
 			    halt(1)
-		    end
+		    end;
+		{error,Reason} ->
+		    io:format(standard_error,
+			      "~s:error: ~p\n", 
+			      [?PROG, Reason]),
+		    halt(1)
 	    end;
-		    
-	{error,Reason} ->
+       Ext =:= ".chasm" ->
+	    case file:consult(Filename) of
+		{ok,Ls} ->
+		    try asm_list(Ls,Opts) of
+			AsmResult ->
+			    do_emit(AsmResult, Opts)
+		    catch
+			?EXCEPTION(error,Reason,StackTrace) ->
+			    io:format(standard_error, "~s:error: ~p\n~p", 
+				      [?PROG, Reason,
+				       ?GET_STACK(StackTrace)
+				      ]),
+			    halt(1)
+		    end;
+		{error,Reason} ->
+		    io:format(standard_error,
+			      "~s:error: ~p\n", 
+			      [?PROG, Reason]),
+		    halt(1)
+	    end;
+       true ->
 	    io:format(standard_error,
 		      "~s:error: ~p\n", 
-		      [?PROG, Reason]),
+		      [?PROG, "unknown file suffix"]),
 	    halt(1)
-    end;
-do_input([], _Opts) ->
-    io:format("~s:error: missing input file\n", [?PROG]),
-    halt(1).
+    end.
+
 
 do_emit({Bin,Symbols,Labels}, Opts) ->
     Format = chine_opt:value(format,Opts),
@@ -202,17 +235,23 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 	"" ->
 	    file:write(user,Output),
 	    halt(0);
-	File ->
-	    case file:write_file(File, Output) of
+	Filename ->
+	    case file:write_file(Filename, Output) of
 		ok ->
+		    case chine_opt:value(disasm,Opts) of
+			true when Format =:= binary ->
+			    chine_disasm:show(Filename);
+			_ ->
+			    ok
+		    end,
 		    case chine_opt:value(execute, Opts) of
-			true ->
+			true when Format =:= binary ->
 			    Exec = filename:join([code:lib_dir(chine),
-						  "bin","chine_exec"]),
-			    Res = os:cmd(Exec ++ " " ++ File),
+						  "bin","chinex"]),
+			    Res = os:cmd(Exec ++ " " ++ Filename),
 			    io:format("~s", [Res]),
 			    halt(0);
-			false ->
+			_ ->
 			    halt(0)
 		    end;
 		{error,Reason} ->
@@ -221,6 +260,8 @@ do_emit({Bin,Symbols,Labels}, Opts) ->
 		    halt(1)
 	    end
     end.
+
+
 
 
 cformat(<<>>,_I) ->
@@ -257,7 +298,7 @@ symbol_table(Symbols, Labels) ->
 	      case maps:find(L, Labels) of
 		  error ->
 		      io:format(standard_error,
-				"warning: exported label ~s not found\n", [L]),
+				"warning: exported label ~p not found\n", [L]),
 		      Acc;
 		  {ok,[Addr]} ->
 		      [{encode_symbol_name(L), Addr}|Acc]
@@ -274,8 +315,7 @@ encode_symbol_name(Name) ->
     binary_to_list(iolist_to_binary(Name)).
 
 asm_list(Code,Opts) ->
-    {Code1,Symbols} = expand_synthetic(Code,Opts),
-    debugf(Opts, "pass: synthetic ~p\n", [Code1]),
+    {Code1,Symbols} = collect_exports(Code),
     Code2 = encode_const(Code1,Opts),
     debugf(Opts, "pass: const ~p\n", [Code2]),
     Code3 = collect_blocks(Code2,Opts),
@@ -287,6 +327,34 @@ asm_list(Code,Opts) ->
     Code6 = encode_opcodes(Code5,Opts),
     {Code6,Symbols,Labels}.
 
+collect_exports(Code) ->
+    collect_exports_(Code, [], #{}).
+
+collect_exports_([{export,L}|Code], Acc, Sym) ->
+    L1 = normalize_label(L),
+    collect_exports_(Code, Acc, Sym#{ {export,L1} => true });
+collect_exports_([Op|Code], Acc, Sym) ->
+    collect_exports_(Code, [Op|Acc], Sym);
+collect_exports_([], Acc, Sym) ->
+    {lists:reverse(Acc), Sym}.
+
+
+normalize_label(L) when is_atom(L) ->
+    atom_to_list(L);
+normalize_label(L) when is_list(L) ->
+    try iolist_size(L) of
+	Len when Len < 256 -> L;
+	_ ->
+	    io:format(standard_error, "label name too long ~s\n", [L]),
+	    erlang:error({label_too_loong, L})
+    catch
+	error:_ ->
+	    io:format(standard_error, "label name not string ~p\n", [L]),
+	    erlang:error({label_not_string, L})
+    end.
+
+
+
 debugf(Opts,Fmt,As) ->
     case chine_opt:value(debug, Opts) of
 	true ->
@@ -294,6 +362,40 @@ debugf(Opts,Fmt,As) ->
 	false ->
 	    ok
     end.
+
+opcode_type(Op) ->
+    opcode_type(Op,#{}).
+
+opcode_type(Int,_Sym) when is_integer(Int) -> literal;
+opcode_type(Float,_Sym) when is_float(Float) -> literal;
+opcode_type(Atom,_Sym) when is_atom(Atom) ->
+    case maps:find(Atom, opcodes()) of
+	{ok, _} -> stack;  %% regular op
+	error -> %% check if it is a sys op
+	    case maps:find(Atom, sys_opcodes()) of
+		{ok, _} -> sys;
+		error -> call   %% assume user call
+	    end
+    end;
+opcode_type({Op,Arg},_Sym) when is_atom(Op) ->
+    case Op of
+	jmpz  -> jop;
+	jmpnz -> jop;
+	next  -> jop;
+	jmplz -> jop;
+	jmp   -> jop;
+	call  -> jop;
+	literal when is_integer(Arg) -> data;
+	arg when is_integer(Arg) -> frame;
+	array when is_list(Arg) -> data;
+	string when is_list(Arg) -> data;
+	string when is_binary(Arg) -> data;
+	fenter when is_integer(Arg) -> frame;
+	fleave when is_integer(Arg) -> frame;
+	fset  when is_integer(Arg) -> frame;
+	_ -> none
+    end;
+opcode_type(_, _) -> none.
 
 %% on input a jump should look like {jmp,L} where L is a label
 %% first pass transform all jumps into generic form {{jop,jmp},L}
@@ -315,7 +417,7 @@ jopcodes() ->
       ?JENUM(array),
       ?JENUM(fenter),
       ?JENUM(fleave),
-      ?JENUM(jop_12),
+      ?JENUM(fset),
       ?JENUM(jop_13),
       ?JENUM(jop_14),
       ?JENUM(jop_15)
@@ -357,7 +459,8 @@ opcodes() ->
       ?ENUM('sp@'),
       ?ENUM('sp!'),
       ?ENUM('c!'),
-      ?ENUM('c@')
+      ?ENUM('c@'),
+      ?ENUM('size')
      }.
 
 syscalls() ->
@@ -405,62 +508,8 @@ syscalls() ->
       ?SENUM(sys_file_seek)
      }.
 
-%% not real opcodes, they are expanded like macros
-%% some may be expanded like calls instead?!
-synthetic_opcodes() ->
+sys_opcodes() ->
     #{
-      '1+'  => [{const,1},'+'],
-      '1-'  => [{const,1},'-'],
-      'lshift' => [shift],
-      'rshift' => [negate,shift],
-      '<'   => ['-', '0<'],
-      '>'   => [swap, '-', '0<'],
-      '<='  => ['-', '0<='],
-      '>='  => [swap,'-', '0<='],
-      '='   => ['-', '0='],
-      '=='  => ['-', '0='],
-      '!='  => ['-', '0=', 'not'],
-      '<>'  => ['-', '0=', 'not'],
-      'u<'  => ['2dup','xor','0<',
-		{'if',[swap,drop,'0<'],['-','0<']}],
-      'u<=' => ['2dup','xor','0<',
-		{'if',[swap,drop,'0<'],['-','0<=']}],
-      'u>'  => [swap, 'u<'],
-      'u>=' => [swap, 'u<='],
-      '0<>' => ['0=', 'not'],
-      '0>'  => [{const,0},'>'],
-      '0<=' => [{const,1},'-','0<'],
-      'abs' => [dup,'0<',{'if',[negate]}],
-      'min' => [over,over,'<',{'if',[drop],[swap,drop]}],
-      'max' => [over,over,'<',{'if',[swap,drop],[drop]}],
-      'nip' => [swap,drop],
-      'tuck' => [swap,over],
-      '-rot' => [rot,rot],
-      '2drop' => [drop,drop],
-      '2dup'  => [over,over],
-      '2*'    => [dup,'+'],
-      'arshift'   => [dup,{const,32},swap,'-',
-		      {const,-1},swap,shift,
-		      '-rot', negate,shift, 'or'],
-      '2/'    => [{const,1},arshift],
-      'sqr'   => [dup,'*'],
-      'mod'   => ['2dup','/','*','-'],
-      'jmp*'  => ['>r', exit],  %% ( caddr -- )
-      ';'     => [exit],
-
-      'alloc'  => ['sp@',swap,'-','sp!'],
-
-      'here'   => [ 0, '@' ],
-      
-      'comma' => [here, swap, over, 'c!', '1+', 0, '!' ],
-
-      %% utils
-      'setbit'    => [{const,1},swap,shift,'or'],
-      'clrbit'    => [{const,1},swap,shift,'not','and'],
-      'togglebit' => [{const,1},swap,shift,'xor'],
-      'tstbit'    => [{const,1},swap,shift,'and'],
-      'setclrbit' => [{'if',[setbit],[clrbit]}],
-
       %% sys interface
       terminate       => [{sys,sys_terminate}],
       now             => [{sys,sys_now}],
@@ -513,142 +562,6 @@ synthetic_opcodes() ->
       file_seek       => [{sys,sys_file_seek}]
      }.
 
-
-expand_synthetic(Code,_Opts) ->
-    expand_synth_(Code,[],#{}).
-
-expand_synth_([{'def', Name, Body}|Code], Acc, Sym) ->
-    expand_synth_([{export,Name},
-		   [{label,Name}]++Body++[exit] | Code], Acc, Sym);
-expand_synth_([{'if',Then}|Code],Acc,Sym) ->
-    L = new_label(),
-    Block = [{{jop,jmpz},L},Then,{label,L}],
-    expand_synth_(Block ++ Code,Acc,Sym);
-expand_synth_([{'if',Then,Else}|Code],Acc,Sym) ->
-    L0 = new_label(),
-    L1 = new_label(),
-    Block = [{{jop,jmpz},L0},Then,{{jop,jmp},L1},
-	     {label,L0},Else,{label,L1}],
-     expand_synth_(Block++Code,Acc,Sym);
-expand_synth_([{'again',Loop}|Code],Acc,Sym) ->
-    L0 = new_label(),
-    Block = [{label,L0},Loop,{{jop,jmp},L0}],
-    expand_synth_(Block++Code,Acc,Sym);
-expand_synth_([{'until',Loop}|Code],Acc,Sym) ->
-    L0 = new_label(),
-    Block = [{label,L0},Loop,{{jop,jmpz},L0}],
-    expand_synth_(Block++Code,Acc,Sym);
-expand_synth_([{'repeat',While,Loop}|Code],Acc,Sym) ->
-    L0 = new_label(),
-    L1 = new_label(),
-    Block = [{label,L0},While,{{jop,jmpz},L1},
-	     Loop,{{jop,jmp},L0},{label,L1}],
-    expand_synth_(Block++Code,Acc,Sym);
-expand_synth_([{'for',Loop}|Code],Acc,Sym) ->
-    L0 = new_label(),
-    Block = ['>r', {label,L0},Loop,{{jop,next},L0}],
-    expand_synth_(Block++Code,Acc,Sym);
-expand_synth_([{enum,Ls}|Code],Acc,Sym) ->
-    Sym1 = add_enums(Ls, Sym),
-    expand_synth_(Code,Acc,Sym1);
-expand_synth_([{define,Name,Value}|Code],Acc,Sym) ->
-    Sym1 = maps:put({symbol,Name},Value,Sym),
-    expand_synth_(Code, Acc, Sym1);
-expand_synth_([{comment,_Comment}|Code],Acc,Sym) ->
-    %% just a comment ignore it
-    expand_synth_(Code,Acc,Sym);
-expand_synth_([{Jop,L}|Code],Acc,Sym) when
-      Jop =:= jmpz; Jop =:= jmpnz;
-      Jop =:= next; Jop =:= jmplz;
-      Jop =:= jmp; Jop =:= call ->
-    L1 = normalize_label(L),
-    expand_synth_(Code,[{{jop,Jop},L1}|Acc], Sym);
-expand_synth_([Op={const,C}|Code],Acc,Sym) when is_integer(C) ->
-    expand_synth_(Code,[Op|Acc],Sym);
-expand_synth_([{const,Name}|Code],Acc,Sym) ->
-    case maps:find({symbol,Name}, Sym) of
-	{ok,C} ->
-	    expand_synth_(Code,[{const,C}|Acc],Sym);
-	error ->
-	    io:format(standard_error, "error: symbol ~p not defined\n",[Name]),
-	    expand_synth_(Code,[{const,Name} | Acc],Sym)
-    end;
-expand_synth_([Op={arg,I}|Code],Acc,Sym) when is_integer(I) ->
-    expand_synth_(Code,[Op|Acc],Sym);
-expand_synth_([{arg,Name}|Code],Acc,Sym) ->
-    case maps:find({symbol,Name}, Sym) of
-	{ok,I} ->
-	    expand_synth_(Code,[{arg,I}|Acc],Sym);
-	error ->
-	    io:format(standard_error, "error: symbol ~p not defined\n",[Name]),
-	    expand_synth_(Code,[{arg,Name} | Acc],Sym)
-    end;
-expand_synth_([{export,L}|Code],Acc,Sym) ->
-    L1 = normalize_label(L),
-    Sym1 = maps:put({export,L1}, 0, Sym),
-    expand_synth_(Code,Acc,Sym1);
-expand_synth_([{label,L}|Code],Acc,Sym) ->
-    L1 = normalize_label(L),
-    expand_synth_(Code,[{label,L1}|Acc],Sym);
-expand_synth_([Op|Code],Acc,Sym) when is_tuple(Op) ->
-    expand_synth_(Code,[Op|Acc],Sym);
-expand_synth_([Op|Code],Acc,Sym) when is_atom(Op) ->
-    Map = synthetic_opcodes(),
-    case maps:find(Op,Map) of
-	error ->
-	    expand_synth_(Code,[Op|Acc],Sym);
-	{ok,Ops} when is_list(Ops) ->
-	    expand_synth_(Ops++Code,Acc,Sym)
-    end;
-expand_synth_([Op|Code],Acc,Sym) when is_integer(Op) ->
-    expand_synth_(Code,[{const,Op}|Acc],Sym);
-expand_synth_([[]|Code],Acc,Sym) ->
-    expand_synth_(Code,Acc,Sym);
-expand_synth_([Ops|Code],Acc,Sym) when is_list(Ops) ->
-    try erlang:iolist_to_binary(Ops) of
-	Bin ->
-	    expand_synth_(Code,[{string,binary_to_list(Bin)}|Acc],Sym)
-    catch
-	error:_ ->
-	    expand_synth_(Ops++Code,Acc,Sym)
-    end;
-expand_synth_([],Acc,Sym) ->
-    {lists:reverse(Acc),Sym}.
-
-add_enums(Es, Sym) ->
-    add_enums_(Es, 0, Sym).
-
-add_enums_([E|Es], I, Sym) ->
-    Sym1 = maps:put({symbol,E}, I, Sym),
-    add_enums_(Es, I+1, Sym1);
-add_enums_([], _I, Sym) ->
-    Sym.    
-
-new_label() ->
-    case get(next_label) of
-	undefined ->
-	    put(next_label, 1),
-	    "L0";
-	I ->
-	    put(next_label, I+1),
-	    [$L|integer_to_list(I)]
-    end.
-
-normalize_label(L) when is_atom(L) ->    
-    atom_to_list(L);
-normalize_label(L) when is_list(L) ->
-    try iolist_size(L) of
-	Len when Len < 256 -> L;
-	_ ->
-	    io:format(standard_error, "label name too long ~s\n", [L]),
-	    erlang:error({label_too_loong, L})
-    catch
-	error:_ ->
-	    io:format(standard_error, "label name not string ~p\n", [L]),
-	    erlang:error({label_not_string, L})
-    end.
-
-
 %%
 %% Replace branch labels with offsets
 %% iterate until all labels are resolved
@@ -695,14 +608,21 @@ resolve_labels_([], Acc, Map, _Addr) ->
 
 %% resolve absolute addresses
 resolve_caddr([{caddr,LType,L}|Code], Acc, Map) ->
-    [Target] = maps:get(L, Map),
+    L1 = normalize_label(L),
+    [Target] = maps:get(L1, Map),
     resolve_caddr(Code, [{literal,LType,Target}|Acc], Map);
+resolve_caddr([{caddr,L}|Code], Acc, Map) ->
+    L1 = normalize_label(L),
+    [Target] = maps:get(L1, Map),
+    Lit = encode_literal(Target),
+    resolve_caddr(Code, [Lit|Acc], Map);
 
 resolve_caddr([{array,Type,Es}|Code], Acc, Map) ->
     Es1 = [ case E of
 		{literal,_,_} -> E;
 		{caddr,L} ->
-		    [Target] = maps:get(L, Map),
+		    L1 = normalize_label(L),
+		    [Target] = maps:get(L1, Map),
 		    Target;
 		_ when is_integer(E);
 		       is_float(E) ->
@@ -870,11 +790,14 @@ collect_blocks(Code,Opts) ->
 
 collect_blocks_(['0=',{{jop,jmpz},L}|Code], Block, Acc, Z) ->
     %% (!X=0) == (X != 0)
-    collect_blocks_([{{jop,jmpnz},L}|Code], Block, Acc, Z);
-collect_blocks_([Op={{jop,_Jop},_L}|Code], Block, Acc,Z) ->
-    collect_blocks_(Code, [], [Op | add_block(Block,Acc)],Z);
-collect_blocks_([Op={label,_L}|Code], Block, Acc,Z) ->
-    collect_blocks_(Code, [], [Op | add_block(Block,Acc)],Z);
+    L1 = normalize_label(L),    
+    collect_blocks_([{{jop,jmpnz},L1}|Code], Block, Acc, Z);
+collect_blocks_([{{jop,Jop},L}|Code], Block, Acc,Z) ->
+    L1 = normalize_label(L),
+    collect_blocks_(Code, [], [{{jop,Jop},L1} | add_block(Block,Acc)],Z);
+collect_blocks_([{label,L}|Code], Block, Acc,Z) ->
+    L1 = normalize_label(L),
+    collect_blocks_(Code, [], [{label,L1} | add_block(Block,Acc)],Z);
 collect_blocks_([Op1|Code1=[Op2|Code2]], Block, Acc,Z) 
   when is_atom(Op1),is_atom(Op2) ->
     Map = opcodes(),
@@ -885,11 +808,18 @@ collect_blocks_([Op1|Code1=[Op2|Code2]], Block, Acc,Z)
        true ->
 	    collect_blocks_(Code1, [Op1|Block], Acc,Z)
     end;
+collect_blocks_([{array,caddr,Es}|Code], Block, Acc, Z) ->
+    Opcode = 
+	{array,caddr,
+	 [case E of
+	      {caddr,L} -> {caddr,normalize_label(L)};
+	      L when is_atom(L); is_list(L) -> {caddr,normalize_label(L)}
+	  end || E <- Es]},
+    collect_blocks_(Code, [Opcode|Block], Acc, Z);
 collect_blocks_([Opcode|Code], Block, Acc, Z) ->
     collect_blocks_(Code, [Opcode|Block], Acc, Z);
 collect_blocks_([], Block, Acc, Z) ->
     {lists:reverse(add_block(Block,Acc)),Z}.
-
 
 add_block([],Code) -> Code;
 add_block(Block,Code) ->
@@ -917,9 +847,12 @@ disperse_blocks_([], Acc) ->
 encode_const(Code,_Opts) ->
     encode_const_(Code,[]).
 
-encode_const_([{const,C}|Code], Acc) ->
+encode_const_([C|Code], Acc) when is_integer(C) ->
     L = encode_literal(C),
     encode_const_(Code, [L|Acc]);
+%%encode_const_([{const,C}|Code], Acc) ->
+%%    L = encode_literal(C),
+%%    encode_const_(Code, [L|Acc]);
 encode_const_([{arg,I}|Code], Acc) ->
     Type = case type_integer(I) of
 	       int3 -> int8;  %% int3 is not available for opcode1
@@ -938,15 +871,21 @@ encode_const_([{fleave,I}|Code], Acc) ->
 	       T -> T
 	   end,
     encode_const_(Code, [{fleave,Type,I}|Acc]);
+encode_const_([{fset,I}|Code], Acc) ->
+    Type = case type_integer(I) of
+	       int3 -> int8;  %% int3 is not available for opcode1
+	       T -> T
+	   end,
+    encode_const_(Code, [{fset,Type,I}|Acc]);
 
 encode_const_([{caddr,L}|Code], Acc) ->
     encode_const_(Code, [{caddr,L}|Acc]);
 encode_const_([{string,S}|Code], Acc) when is_list(S) ->
-    %% fixme: unicode
-    encode_const_([{array,[{{uint,8},C} || C <- S]}|Code], Acc);
+    S1 = null_terminate(S),
+    encode_const_([{array,{uint,8},S1}|Code], Acc);
 encode_const_([{string,S}|Code], Acc) when is_binary(S) ->
-    %% fixme: utf8
-    encode_const_([{array,[{{uint,8},C} || <<C>> <= S]}|Code], Acc);
+    S1 = null_terminate([C || <<C>> <= S]),
+    encode_const_([{array,{uint,8},S1}|Code], Acc);
 encode_const_([{array,Es}|Code], Acc) ->
     A = encode_array(Es, undefined),
     encode_const_(Code, [A|Acc]);
@@ -956,10 +895,27 @@ encode_const_([{array,Type,Es}|Code], Acc) ->
 encode_const_([{sys, SysOp}|Code], Acc) ->
     Sys = maps:get(SysOp, syscalls()),
     encode_const_(Code, [{sys,Sys}|Acc]);
-encode_const_([C|Code],Acc) ->
-    encode_const_(Code, [C|Acc]);
+encode_const_([Op|Code],Acc) when is_atom(Op) ->
+    case opcode_type(Op) of
+	stack -> encode_const_(Code, [Op|Acc]);
+	sys -> 
+	    [{sys,Sys}] = maps:get(Op, sys_opcodes()),
+	    Num = maps:get(Sys, syscalls()),
+	    encode_const_(Code, [{sys,Num}|Acc]);
+	call ->
+	    encode_const_(Code, [{{jop,call},Op}|Acc])
+    end;
+encode_const_([{Op,Arg}|Code],Acc) when is_atom(Op) ->
+    case opcode_type({Op,Arg}) of
+	jop -> encode_const_(Code, [{{jop,Op},Arg}|Acc]);
+	_ -> encode_const_(Code, [{Op,Arg}|Acc])
+    end;
 encode_const_([],Acc) ->
     lists:reverse(Acc).
+
+null_terminate([]) -> [0];
+null_terminate([0]) -> [];
+null_terminate([C|Cs]) -> [C|null_terminate(Cs)].
 
 %% encode array
 encode_array(Es, EType0) ->
@@ -969,51 +925,58 @@ encode_array(Es, EType0) ->
 encode_array_elements([E|Es],Type,Acc) ->
     case E of
 	{EType, V} ->
-	    encode_array_elements(Es,union_type(EType, Type),[V|Acc]);
-	I when is_integer(I) ->
-	    N = nbits(I),
-	    encode_array_elements(Es,union_type({int,N},Type),[I|Acc]);
+	    U = union_type(EType, Type),
+	    encode_array_elements(Es,U,[V|Acc]);
+	I when is_integer(I), I >= 0 ->
+	    N = nbits(I),	    
+	    U = union_type({uint,N},Type),
+	    encode_array_elements(Es,U,[I|Acc]);
+	I when is_integer(I), I < 0 ->
+	    N = nbits(-I-1)+1,
+	    U = union_type({int,N},Type),
+	    encode_array_elements(Es,U,[I|Acc]);
 	F when is_float(F) ->
 	    encode_array_elements(Es,union_type({float,32},Type),[F|Acc])
     end;
+encode_array_elements([],caddr,Acc) ->
+    {caddr,[{caddr,A} || A <- lists:reverse(Acc)]};
 encode_array_elements([],Type,Acc) ->
     Type1 = pow2_type(Type),
-    {Type,coerce_array_element(Type1,Acc,[])}.
+    {Type1,coerce_array_element(Type1,Acc,[])}.
 
 coerce_array_element(Type, [E|Es], Acc) -> 
-    case Type of
-	{float,32} ->
-	    coerce_array_element(Type,Es,[float(E)|Acc]);
-	{uint,N} ->
-	    M = (1 bsl N) - 1,
-	    coerce_array_element(Type,Es,[(trunc(E) band M)|Acc]);
-	{int,N} -> 
-	    _M = (1 bsl N) - 1,  %% fixme
-	    coerce_array_element(Type,Es,[trunc(E)|Acc])
-    end;
+    coerce_array_element(Type,Es,[coerce_element(Type,E)|Acc]);
 coerce_array_element(_Type, [], Acc) ->
     Acc.
 
+coerce_element({float,32}, E) ->
+    float(E);
+coerce_element({uint,N}, E) -> 
+    trunc(E) band ((1 bsl N) - 1);
+coerce_element({int,N}, E) -> 
+    trunc(E) band ((1 bsl N) - 1).
+    
 pow2_type({int,N}) -> 
-    if N < 8 -> {int,8};
-       N < 16 -> {int,16};
-       N < 32 -> {int,32}
+    if N =< 8 -> {int,8};
+       N =< 16 -> {int,16};
+       N =< 32 -> {int,32}
     end;
 pow2_type({uint,N}) -> 
-    if N < 8 ->  {uint,8};
-       N < 16 -> {uint,16};
-       N < 32 -> {uint,32}
+    if N =< 8 ->  {uint,8};
+       N =< 16 -> {uint,16};
+       N =< 32 -> {uint,32}
     end;
 pow2_type({float,_N}) ->
     {float,32}.
-    
+
 encode_element_type({int, 8})  -> 16#80;
 encode_element_type({int, 16}) -> 16#81;
 encode_element_type({int, 32}) -> 16#82;
 encode_element_type({uint, 8})  -> 16#00;
 encode_element_type({uint, 16}) -> 16#01;
 encode_element_type({uint, 32}) -> 16#02;
-encode_element_type({float, 32}) -> 16#92.
+encode_element_type({float, 32}) -> 16#92;
+encode_element_type(caddr) -> 16#81.
 
 union_type(undefined, T)       -> T;
 union_type(T,undefined)        -> T;
@@ -1030,7 +993,7 @@ nbits(N) when is_integer(N), N > 0 ->
     trunc(math:log2(N))+1;
 nbits(N) when is_integer(N), N < 0 ->
     trunc(math:log2(-N))+1.
-    
+
 %% encode some integer constants
 encode_literal(true)    -> encode_literal(?CHINE_TRUE);
 encode_literal(false)   -> encode_literal(?CHINE_FALSE);
@@ -1047,11 +1010,13 @@ type_integer(I) when is_integer(I) ->
        I =< 16#ffffffff -> uint32
     end.
 
+-ifdef(not_used).
 type_unsigned(I) when is_integer(I), I >= 0 ->
     if I =< 16#ff -> uint8;
        I =< 16#ffff -> uint16;
        I =< 16#ffffffff -> uint32
     end.
+-endif.
 
 %% 
 %% Length of basic block in bytes
@@ -1076,6 +1041,8 @@ opcode_length({literal,uint8,_X}) -> 2;
 opcode_length({literal,uint16,_X}) -> 3;
 opcode_length({literal,uint32,_X}) -> 5;
 
+opcode_length({array,caddr,Es}) ->
+    opcode_length({array,int16,Es});  %% fixme
 opcode_length({array,EType,Es}) ->
     N = length(Es),
     VL = variant_length(EType),
@@ -1096,6 +1063,11 @@ opcode_length({fenter,int32,_X}) -> 5;
 opcode_length({fleave,int8,_X}) -> 2;
 opcode_length({fleave,int16,_X}) -> 3;
 opcode_length({fleave,int32,_X}) -> 5;
+
+opcode_length({fset,int8,_X}) -> 2;
+opcode_length({fset,int16,_X}) -> 3;
+opcode_length({fset,int32,_X}) -> 5;
+
 
 opcode_length({caddr,uint3,_L})  -> 1;
 opcode_length({caddr,uint8,_L})  -> 2;
@@ -1156,6 +1128,13 @@ encode_opcodes_([{fleave,Kv,I}|Code], Acc, Map) ->
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
     OP = ?OPCODE1(?JOP(fleave),Kc),
+    encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
+
+encode_opcodes_([{fset,Kv,I}|Code], Acc, Map) ->
+    K = variant_length(Kv),
+    Kc = variant_code(Kv),
+    Is = encode_integer(I,K),
+    OP = ?OPCODE1(?JOP(fset),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
 encode_opcodes_([{{jop,Jmp,int3},I}|Code], Acc, Map) ->
@@ -1222,7 +1201,9 @@ variant_length(int32) -> 4;
 variant_length(uint8)  -> 1;
 variant_length(uint16) -> 2;
 variant_length(uint32) -> 4;
-variant_length(float32) -> 4.
+variant_length(float32) -> 4;
+%% fixme: caddr
+variant_length(caddr) -> 2.
 
 variant_code(int8)      -> 0;
 variant_code(int16)     -> 1;
@@ -1235,11 +1216,16 @@ variant_code(uint8x16)  -> 1;
 variant_code(uint8x32)  -> 2;
 variant_code(uint16x8)  -> 4;
 variant_code(uint16x16) -> 5;
-variant_code(uint16x32) -> 6.
+variant_code(uint16x32) -> 6;
+%% fixme: caddr
+variant_code(caddr) -> 1.
+
 
 encode_array_element(Value, {int,N}) -> binary_to_list(<<Value:N/signed>>);
 encode_array_element(Value, {uint,N}) -> binary_to_list(<<Value:N/unsigned>>);
-encode_array_element(Value, {float,N}) -> binary_to_list(<<Value:N/float>>).
+encode_array_element(Value, {float,N}) -> binary_to_list(<<Value:N/float>>);
+%% fixme: caddr
+encode_array_element(Value, caddr) -> binary_to_list(<<Value:16/signed>>).
 
 %% encode offset of K bytes as byte list
 encode_integer(X,1) -> binary_to_list(<<X:8>>);

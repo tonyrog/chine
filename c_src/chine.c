@@ -154,7 +154,7 @@ static const instr_info_t op_info[] = {
     [NOT] = { "not",     1, 1 },
     [NEGATE] = { "negate",  1, 1 },
     [DIV] = { "/",       2, 1 },
-    [SHFT] = { "shift",   2, 1 },
+    [SHIFT] = { "shift",   2, 1 },
     [STORE] = { "!",       2, 0 },
     [FETCH] = { "@",       1, 1 },
     [TOR] = { ">r",      1, 0 },
@@ -171,6 +171,7 @@ static const instr_info_t op_info[] = {
     [SPSTORE] = { "sp!",     1, 0 },
     [CSTORE] = { "c!",       2, 0 },
     [CFETCH] = { "c@",       1, 1 },
+    [SIZE]   = { "size",     1, 1 },
 };
 
 static const instr_info_t jop_info[] = {
@@ -184,9 +185,9 @@ static const instr_info_t jop_info[] = {
     [JOP_7]   = { "jop_7",   0, 0 },
     [ARG]     = { "arg",     0, 1 },  // op1 = 8
     [ARRAY]   = { "array",   0, 1 },  // op1 = 9
-    [FENTER]  = { "fenter",  0, 0 },
-    [FLEAVE]  = { "fleave",  0, 0 },
-    [JOP_12]  = { "jop_12",  0, 0 }, 
+    [FENTER]  = { "fenter",  0, 0 },  // op1 = 10
+    [FLEAVE]  = { "fleave",  0, 0 },  // op1 = 11
+    [FSET]    = { "fset",    1, 0 },  // op1 = 12
     [JOP_13]  = { "jop_13",  0, 0 },
     [JOP_14]  = { "jop_14",  0, 0 },
     [JOP_15]  = { "jop_15",  0, 0 },    
@@ -232,22 +233,28 @@ static int effect_update(uint8_t I, int* bp, int* ap, int depth)
 
 // display part of stack that is used by the op
 // BEFORE operation starts
-void static trace_begin(uint8_t TI, cell_t* sp)
+void static trace_begin(chine_t* mp,uint8_t TI,cell_t A,cell_t* sp)
 {
     int i;
     // int d;
     // int a;
     int b;
     int mi = 9, ma = 0;
+    // int spos = sp - mp->stack;
 
     if (!trace)
 	return;
-    
-    (void) effect_update(TI, &mi, &ma, 0); // d =
-    b = -mi;
+    // printf("A=%d,", A);
+    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|FENTER))
+	b = A >> 16;
+    else {
+	(void) effect_update(TI, &mi, &ma, 0); // d =
+	b = -mi;
+    }
     // a = -mi + d;    
     
     // printf("b=%d,a=%d (", b, a);
+    // printf("sp=%d (", spos);
     printf(" (");
     if (b) {
 	for (i = b-1; i > 0; i--)
@@ -261,19 +268,24 @@ void static trace_begin(uint8_t TI, cell_t* sp)
 
 // display part of stack that is used by the op
 // AFTER operation ends
-void static trace_end(uint8_t TI, cell_t* sp)
+void static trace_end(chine_t* mp,uint8_t TI, cell_t A, cell_t* sp)
 {
     int a;
     // int b;
     int i, d;
     int mi = 9, ma = 0;
+    // int spos = sp - mp->stack;    
 
     if (!trace)
-	return;    
-    
-    d = effect_update(TI, &mi, &ma, 0);
-    // b = -mi;
-    a = -mi + d;
+	return;
+
+    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|FLEAVE))
+	a = A & 0xf; // number of return values
+    else {
+	d = effect_update(TI, &mi, &ma, 0);
+	// b = -mi;
+	a = -mi + d;
+    }
 
     if (a) {
 	for (i = a-1; i > 0; i--) 
@@ -320,11 +332,11 @@ static const char* trace_ins(uint8_t ins)
 
 #define TRACEF(...) if (trace) printf(__VA_ARGS__)
 
-#define BEGIN { if (I!=SKIP) { SAVE(); trace_begin(TI,cSP); RESTORE();} {
-#define XEND  } SAVE(); trace_end(TI,cSP); RESTORE(); }
-#define TEND  SAVE(); trace_end(TI,cSP); RESTORE()
-#define END   } SAVE(); trace_end(TI,cSP); RESTORE(); NEXT; }
-#define END3  } if ((I&OPMASK)!=OP3INS) { SAVE(); trace_end(TI,cSP); RESTORE(); } NEXT3; }
+#define BEGIN { if (I!=SKIP) { SAVE(); trace_begin(mp,TI,A,cSP); RESTORE();} {
+#define XEND  } SAVE(); trace_end(mp,TI,A,cSP); RESTORE(); }
+#define TEND  SAVE(); trace_end(mp,TI,A,cSP); RESTORE()
+#define END   } SAVE(); trace_end(mp,TI,A,cSP); RESTORE(); NEXT; }
+#define END3  } if ((I&OPMASK)!=OP3INS) { SAVE(); trace_end(mp,TI,A,cSP); RESTORE(); } NEXT3; }
 
 #else
 
@@ -382,6 +394,50 @@ static const char* trace_ins(uint8_t ins)
 	}							\
 	goto next;						\
     } while(0)
+
+static uint8_t* get_array(chine_t* mp, cell_t aoffs)
+{
+    uint8_t* aptr = mp->prog + aoffs;
+    if ((aptr[0] & OP1MASK) != ARRAY) return NULL;
+    return aptr;
+}
+
+static cell_t sizeof_array(uint8_t* aptr)
+{
+    cell_t L = get_op1_len(aptr[0]);            // arg len
+    cell_t A = get_signed(L, aptr[0], aptr+1);  // number of bytes
+    int n = aptr[L+1] & 0x3;
+    // printf("L=%d,A=%d,n=%d\n", L, A, n);
+    return (A-L) >> n;         // L = number of elements    
+}
+
+static cell_t get_element(uint8_t* aptr, cell_t hl, int i)
+{
+    int n, s;
+
+    aptr += (1+hl);              // skip past op en A to element type
+    n = aptr[0] & 0x03;          // element byte size = 2^n
+    s = aptr[0] & 0x80;          // element sign
+    aptr++;                      // start of array
+    i = i << n;                  // scale to multiple of element size
+    if (s) {
+	switch(n) {
+	case 0: return INT8(aptr+i);
+	case 1: return INT16(aptr+i);
+	case 2: return INT32(aptr+i);
+	default: return 0; // error?
+	}
+    }
+    else {
+	switch(n) {
+	case 0: return UINT8(aptr+i);
+	case 1: return UINT16(aptr+i);
+	case 2: return UINT32(aptr+i);
+	default: return 0; // error?
+	}
+    }    
+}
+
 
 int chine_run(chine_t* mp)
 {
@@ -557,7 +613,7 @@ next3:
 	    END;
 	}
 
-    CASE(SHFT): { // shift left (or right)
+    CASE(SHIFT): { // shift left (or right)
 	    BEGIN;
 	    A = FST;
 	    POP();
@@ -647,43 +703,27 @@ next3:
 	    END;
 	}
 
+    CASE(SIZE): {
+	    BEGIN;
+	    uint8_t* aptr;	    
+	    if ((aptr = get_array(mp, FST)) == NULL)
+		goto L_FAIL_INVALID_ARGUMENT;
+	    FST = sizeof_array(aptr);
+	    END;
+	}
+
     CASE(ELEM): {
 	    BEGIN;
 	    uint8_t* aptr;
-	    int i, n, s;
-	    // check that top of element is an array pointer, 
-	    // and that index on second element is an index into
-	    // that  array, push the element onto stack
-	    i = FST;             // get index
-	    POP();
-	    aptr = mp->prog + FST;       // get array address
-	    // printf("elem: offs = %d, [aptr]=%d\r\n", FST, aptr[0]);
-	    if ((aptr[0] & OP1MASK) != ARRAY) goto L_FAIL_INVALID_ARGUMENT;
+	    int i;
+	    i = FST;             // array index
+ 	    POP();
+	    if ((aptr = get_array(mp, FST)) == NULL)
+		goto L_FAIL_INVALID_ARGUMENT;
 	    L = get_op1_len(aptr[0]);    // number of bytes for A
-	    A = get_signed(L, aptr[0], aptr+1); // the SIGNED argument
-	    aptr += (1+L);  // skip past op en A to element  type
-	    n = aptr[0] & 0x03;  // element byte size = 2^n
-	    s = aptr[0] & 0x80;  // element sign
-	    aptr++;              // start of array
-	    L = (A-L-1) >> n;    // L = number of elements
-	    if ((i < 0) || (i > L)) goto L_FAIL_INVALID_ARGUMENT;
-	    i = i << n;          // scale to multiple of element size
-	    if (s) {
-		switch(n) {
-		case 0: FST = INT8(aptr+i); break;
-		case 1: FST = INT16(aptr+i); break;
-		case 2: FST = INT32(aptr+i); break;
-		default: goto L_FAIL_INVALID_ARGUMENT;
-		}
-	    }
-	    else {
-		switch(n) {
-		case 0: FST = UINT8(aptr+i); break;
-		case 1: FST = UINT16(aptr+i); break;
-		case 2: FST = UINT32(aptr+i); break;
-		default: goto L_FAIL_INVALID_ARGUMENT;
-		}
-	    }
+	    A = sizeof_array(aptr);      // number of elements
+	    if ((i < 0) || (i > A)) goto L_FAIL_INVALID_ARGUMENT;
+	    FST = get_element(aptr, L, i);
 	    END;
 	}
 	
@@ -813,21 +853,22 @@ jump:  // op1 and op2
 	    END;
 	}
 
-    CASE(FENTER): {  // A = <<nlocals:16>>
+    CASE(FENTER): {  // A = <<nargs:8,nlocals:16>>
 	    // 'fenter' => ['fp@','>r','sp@','fp!'],
 	    BEGIN;
+	    cell_t L = A & 0xffff;     // locals
 	    // check arg?
 	    *cRP++ = (cFP - mp->mem);  // save old fp on return stack
 	    SAVE();
 	    cFP = cSP;                 // set new fp
 	    // clear locals
-	    memset((void*)(cFP-A), 0x00, A*sizeof(cell_t));
+	    memset((void*)(cFP-L), 0x00, L*sizeof(cell_t));
 	    // setup new stack top
 #ifdef USE_TOS_CACHE
-	    cSP -= (A+1);
+	    cSP -= (L+1);
 	    TOS = 0;
 #else
-	    cSP -= A;   
+	    cSP -= L;   
 #endif
 	    END;
 	}
@@ -835,17 +876,24 @@ jump:  // op1 and op2
     CASE(FLEAVE): { // A = <<nargs:8,nret:4>>
 	    // 'fleave' => ['fp@','r>','fp!','sp!'],
 	    BEGIN;
+	    cell_t R = A & 0xf;     // number of return values
+	    cell_t N = A >> 4;      // N is number of arguments
 	    cell_t FP0 = cFP - mp->mem;  // save furrent = fp@
 	    cell_t* SP0;
 	    SAVE();
-	    SP0 = cSP + (A & 0xf);
+	    SP0 = cSP + R;
 	    cFP = mp->mem + *--cRP;      // restore fp
-	    cSP = (mp->mem + FP0 + (A >> 4)); // restore sp + remove args
-	    // copy return value
-	    A = A & 0xf;
-	    while(A--)
+	    cSP = (mp->mem + FP0 + N); // restore sp + remove args
+	    while(R--)
 		*--cSP = *--SP0;
 	    RESTORE();
+	    END;
+	}
+
+    CASE(FSET): {  // A = index in Fp
+	    BEGIN;
+	    cFP[A] = FST;
+	    POP();
 	    END;
 	}
 

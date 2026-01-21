@@ -3,52 +3,26 @@
 %%
 {export, run}.
 
+{import, "io"}.
+
 {function, [], run, [], [t0,t1,f],
  [
-  {call, println, [123]},
-  {call, println, [-123]},
   {op,':=',t0, now},
   {op,':=',f,{call, fib, [17]}},
   {op,':=',t1, now},
+  {call,puts,[{string,"fibonacci(17)="}]},
   {call,println,[f]},
-  {call,println,[{op,'-',t1,t0}]}, 
+  {call,puts,[{string,"time="}]},
+  {call,print,[{op,'-',t1,t0}]}, 
+  {call,puts,[{string,"ms\n"}]},
   terminate
  ]}.
 
 {function, [int], fib, [n], [],
  [
-  {'if', {op,'==',n,0}, 
-   {const, 0},
-   {'if', {op,'==',n,1}, 
-    {const, 1},
+  {'if', {op,'==',n,0}, 0,
+   {'if', {op,'==',n,1}, 1,
     {op,'+',
      {call,fib,[{op,'-',n,1}]},
      {call,fib,[{op,'-',n,2}]}}}}
  ]}.
-
-%% PRINTLN: ( n -- )
-{function, [], println, [n], [],
-[
- {call,print,[n]},
- [$\n,emit]
-]}.
-
-%% PRINT: ( n -- )
-{function, [], print, [n], [],
-[
- {'if', {op, '==', n, 0}, [$0,emit],
-  {'if', {op, '<', n, 0},
-   [$-,emit,{call, uprint, [{op,negate,n}]}],
-   {call, uprint, [n]}
-  }
- }
-]}.
-
-%% UPRINT: ( n -- ) n>0
-{function, [], uprint, [n], [], 
-[
- {'if', {op, '>', n, 0},
-  [{call,uprint,[{op,'/',n,10}]},
-   {'op','+',{'op',mod,n,10},$0}, emit
-  ]}
-]}.

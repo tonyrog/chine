@@ -26,11 +26,11 @@
 	 literal,
 	 jop_7,
 	 %% OPCODE1 only
-	 arg,     %% 8
+	 arg,     %% 8  get element in stack frame
 	 array,   %% 9
-	 fenter,  %% 10
-	 fleave,  %% 11
-	 jop_12,
+	 fenter,  %% 10 enter stack frame
+	 fleave,  %% 11 leave stack frame
+	 fset,    %% 12 set element in stack frame
 	 jop_13,
 	 jop_14,
 	 jop_15
@@ -79,7 +79,8 @@
 	 'sp@',
 	 'sp!',
 	 'c!',
-	 'c@'
+	 'c@',
+	 'size'
 	}).
 -define(OP(X), ((#opcode.X)-2)).
 -define(ENUM(X), X => ((#opcode.X)-2)).

@@ -1,0 +1,16 @@
+%% -*- erlang -*-
+
+%% setbit ( a n -- (a | (1 << n)) )
+{def, setbit,  [1,swap,shift,'or']}.
+
+%% clrbit ( a n -- (a & ~(1 << n)))
+{def, clrbit, [1,swap,shift,'not','and']}.
+
+%% togglebit ( a n -- (a ^ (1 << n)))
+{def, togglebit, [1,swap,shift,'xor']}.
+
+%% tstbit ( a n -- ((a >> n) & 1)
+{def, tstbit, [shift,1,'and']}.
+
+%% setclrbit ( a n t -- a' )
+{def, setclrbit, {'if',[setbit],[clrbit]}}.

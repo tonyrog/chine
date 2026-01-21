@@ -1,0 +1,23 @@
+%% -*- erlang -*-
+%% test functions with two return values
+{export, run}.
+
+{import, "io"}.
+
+{function, [], run, [], [t1,t2],
+ [
+  {op,':=',[t1,t2], {call, swap, [1,2]}},
+  {call,println, [t1]},  {call, println, [t2]},
+  {op,':=',[t1,t2], {call, add,  [1,2,3,4]}},
+  {call,println, [t1]},  {call, println, [t2]}
+ ]}.
+
+{function, [int,int], swap, [a,b], [],
+ [
+  b, a
+ ]}.
+
+{function, [int,int], add, [x1,y1,x2,y2], [],
+ [
+  {op,'+',x1,x2}, {op,'+',y1,y2}
+ ]}.

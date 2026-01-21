@@ -151,7 +151,7 @@ typedef enum {
     ARRAY   = 9,    // Array+String (of constants)
     FENTER  = 10,   // Setup call frame
     FLEAVE  = 11,   // Remove call frame
-    JOP_12  = 12,
+    FSET    = 12,   // set arg/local in a frame
     JOP_13  = 13,
     JOP_14  = 14,
     JOP_15  = 15,
@@ -178,7 +178,7 @@ typedef enum {
     OP_15   = 15,       // unassigned
     NEGATE  = 16,       // negate: ( a -- (-a) )
     DIV     = 17,       // / ( a b -- (a/b) )
-    SHFT    = 18,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
+    SHIFT   = 18,       // shift ( a n -- ( a << n, n>=0 ) | ( a >> -n, n<0) )
     STORE   = 19,       // ! ( n addr -- )
     FETCH   = 20,       // @ ( addr -- n )
     TOR     = 21,       // >r ( n -- ) R: ( -- n )
@@ -195,6 +195,7 @@ typedef enum {
     SPSTORE = 32,       // sp! ( sp -- )
     CSTORE  = 33,       // c!  ( b c-addr -- )
     CFETCH  = 34,       // c@  ( c-addr -- b )
+    SIZE    = 35,       // size ( array-ptr -- n )
     //... unassigned
     SKIP    = 63        // used in dispatch of op3
 } opcode_t;
