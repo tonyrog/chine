@@ -1,4 +1,9 @@
 %% -*- erlang -*-
+{export, setbit}.
+{export, clrbit}.
+{export, togglebit}.
+{export, tstbit}.
+{export, setclrbit}.
 
 %% setbit ( a n -- (a | (1 << n)) )
 {def, setbit,  [1,swap,shift,'or']}.
@@ -13,4 +18,5 @@
 {def, tstbit, [shift,1,'and']}.
 
 %% setclrbit ( a n t -- a' )
-{def, setclrbit, {'if',[setbit],[clrbit]}}.
+{def, setclrbit, [{'_if',[setbit],[clrbit]}]}.
+

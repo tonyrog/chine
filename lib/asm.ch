@@ -50,11 +50,11 @@
 {def, op1, 
  [ 
    swap,
-   dup, -16#8000, '<', {'if', [2#100000, {call,op1_}, {call,comma4}, exit]},
-   dup,  16#7fff, '>', {'if', [2#100000, {call,op1_}, {call,comma4}, exit ]},
-   dup, -16#80,   '<', {'if', [2#010000, {call,op1_}, {call,comma2}, exit ]},
-   dup,  16#7f,   '>', {'if', [2#010000, {call,op1_}, {call,comma2}, exit ]},
-   2#0000000, {call,op1_},comma
+   dup, -16#8000, '<', {'_if', [2#100000, op1_, comma4, exit]},
+   dup,  16#7fff, '>', {'_if', [2#100000, op1_, comma4, exit ]},
+   dup, -16#80,   '<', {'_if', [2#010000, op1_, comma2, exit ]},
+   dup,  16#7f,   '>', {'_if', [2#010000, op1_, comma2, exit ]},
+   2#0000000, op1_, comma
 ]}.
 
 %% code1 : ( jjjj arg ee0000 -- arg )
@@ -82,56 +82,58 @@
   comma]}.
  
 
-{def, j_dup,   [ {const, dup},  {call,op0} ]}.
-{def, j_rot,   [ {const, rot},  {call,op0} ]}.
-{def, j_over,  [ {const, over}, {call,op0} ]}.
-{def, j_drop,  [ {const, drop}, {call,op0} ]}.
-{def, j_swap,  [ {const, swap}, {call,op0} ]}.
-{def, 'j_-',   [ {const, '-'},  {call,op0} ]}.
-{def, 'j_+',   [ {const, '+'},  {call,op0} ]}.
-{def, 'j_*',   [ {const, '*'},  {call,op0} ]}.
+{def, j_dup,   [ {const, dup},  op0 ]}.
+{def, j_rot,   [ {const, rot},  op0 ]}.
+{def, j_over,  [ {const, over}, op0 ]}.
+{def, j_drop,  [ {const, drop}, op0 ]}.
+{def, j_swap,  [ {const, swap}, op0 ]}.
+{def, 'j_-',   [ {const, '-'},  op0 ]}.
+{def, 'j_+',   [ {const, '+'},  op0 ]}.
+{def, 'j_*',   [ {const, '*'},  op0 ]}.
 
-{def, j_nop,   [ {const, nop},  {call,op0} ]}.
+{def, j_nop,   [ {const, nop}, op0 ]}.
 
-{def, j_short_jmp, [ {const, jmp}, {call,op2} ]}.
-{def, j_long_jmp,  [ {const, jmp}, {call,op1} ]}.
+{def, j_short_jmp, [ {const, jmp}, op2 ]}.
+{def, j_long_jmp,  [ {const, jmp}, op1 ]}.
 
 %% dup_swap dup then swap
-{def, j_dup_swap, [{const,dup},{const,swap},{call,op3}]}.
+{def, j_dup_swap, [{const,dup},{const,swap},op3]}.
+
+{export, run}.
 
 {def, run, 
 [
  here,  %% push original dp pointer
- {call, compile},
+ compile,
  dup, here, swap, '-',  %% dp0 n
- dup, {call, println},  %% print size
- {call, xdump},
+ dup, println,  %% print size
+ xdump,
  $\n, emit,
  terminate]}.
 
 {def, compile,
 [
- {call, j_dup},  $0, emit, $\n, emit,
- {call, j_rot},  $1, emit, $\n, emit,
- {call, j_over}, $2, emit, $\n, emit,
- {call, j_drop}, $3, emit, $\n, emit,
- {call, j_swap}, $4, emit, $\n, emit,
- {call, 'j_-'},  $5, emit, $\n, emit,
- {call, 'j_+'},  $6, emit, $\n, emit,
- {call, 'j_*'},  $7, emit, $\n, emit,
+ j_dup,  $0, emit, $\n, emit,
+ j_rot,  $1, emit, $\n, emit,
+ j_over, $2, emit, $\n, emit,
+ j_drop, $3, emit, $\n, emit,
+ j_swap, $4, emit, $\n, emit,
+ 'j_-',  $5, emit, $\n, emit,
+ 'j_+',  $6, emit, $\n, emit,
+ 'j_*',  $7, emit, $\n, emit,
  %% 0b11000100 = 0xC4
- {call, j_dup_swap}, $C, emit, $4, emit, $\n, emit, 
+ j_dup_swap, $C, emit, $4, emit, $\n, emit, 
  %% 0b10010100 = 0x94
- 2, {call, j_short_jmp}, $9, emit, $4, emit, $\n, emit,
+ 2, j_short_jmp, $9, emit, $4, emit, $\n, emit,
  %% 0b01010100 = 0x54 0x03 0xE8
- 1000, {call, j_long_jmp}, $X, emit, $\n, emit,
+ 1000, j_long_jmp, $X, emit, $\n, emit,
  nop
 ]}.
 
 %% PRINTLN: ( n -- )
 {def, println,
 [
- {call,print},
+ print,
  $\n,emit
 ]}.
 
@@ -139,34 +141,34 @@
 {def, print,
 [
  dup, '0=',
- {'if', [$0,emit,drop,exit]},
+ {'_if', [$0,emit,drop,exit]},
  dup, '0<',
- {'if', [$-,emit,negate]},
+ {'_if', [$-,emit,negate]},
  {call,uprint}
 ]}.
 
 %% UPRINT: ( n -- ) n>=0
 {def, uprint,
  [
-  dup, '0=', {'if', [drop,exit]},
+  dup, '0=', {'_if', [drop,exit]},
   dup, 10, mod,
   swap,
   10,'/',
-  {call,uprint},
+  uprint,
   $0,'+',emit
  ]}.
 
 %% c-addr n 
 {def, xdump,
 [
- {for, [dup, 'c@', {call,xemit8}, $\s, emit, '1+']}
+ {'_for', [dup, 'c@', xemit8, $\s, emit, '1+']}
 ]}.
 
 %% xemit8: ( n -- )
 {def, xemit8,
 [
- dup, -4, shift, {call,xemit4},
- {call,xemit4}
+ dup, -4, shift, xemit4,
+ xemit4
 ]}.
 
 %% xemit4: ( n -- ) 
@@ -174,7 +176,7 @@
 {def, xemit4,
  [
   16#f, 'and',
-  dup, 9, '>', {'if', [10, '-', $a, '+', emit, exit]},
+  dup, 9, '>', {'_if', [10, '-', $a, '+', emit, exit]},
   $0, '+', emit
 ]}.
   

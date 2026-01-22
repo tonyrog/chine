@@ -16,9 +16,14 @@
 -export([options/0]).
 -export([effect_all/0]).
 
+%% debug
 -export([encode_const/2]).
 -export([encode_array/2]).
 -export([nbits/1]).
+-export([opcode_length/1]).
+-export([variant_length/1]).
+-export([type_integer/1]).
+-export([type_integer8/1]).
 
 -include("../include/chine.hrl").
 
@@ -854,28 +859,16 @@ encode_const_([C|Code], Acc) when is_integer(C) ->
 %%    L = encode_literal(C),
 %%    encode_const_(Code, [L|Acc]);
 encode_const_([{arg,I}|Code], Acc) ->
-    Type = case type_integer(I) of
-	       int3 -> int8;  %% int3 is not available for opcode1
-	       T -> T
-	   end,
+    Type = type_integer8(I),
     encode_const_(Code, [{arg,Type,I}|Acc]);
 encode_const_([{fenter,I}|Code], Acc) ->
-    Type = case type_integer(I) of
-	       int3 -> int8;  %% int3 is not available for opcode1
-	       T -> T
-	   end,
-    encode_const_(Code, [{fenter,Type,I}|Acc]);
+    Type = type_integer8(I),
+	       encode_const_(Code, [{fenter,Type,I}|Acc]);
 encode_const_([{fleave,I}|Code], Acc) ->
-    Type = case type_integer(I) of
-	       int3 -> int8;  %% int3 is not available for opcode1
-	       T -> T
-	   end,
+    Type = type_integer8(I),
     encode_const_(Code, [{fleave,Type,I}|Acc]);
 encode_const_([{fset,I}|Code], Acc) ->
-    Type = case type_integer(I) of
-	       int3 -> int8;  %% int3 is not available for opcode1
-	       T -> T
-	   end,
+    Type = type_integer8(I),
     encode_const_(Code, [{fset,Type,I}|Acc]);
 
 encode_const_([{caddr,L}|Code], Acc) ->
@@ -1002,6 +995,13 @@ encode_literal(analog)  -> encode_literal(?INPUT_ANALOG);
 encode_literal(encoder) -> encode_literal(?INPUT_ENCODER);
 encode_literal(I) when is_integer(I) -> {literal,type_integer(I), I}.
 
+type_integer8(I) when is_integer(I) ->
+    if I >= -16#80, I =< 16#7f -> int8;
+       I >= -16#8000, I =< 16#7fff -> int16;
+       I >= -16#80000000, I =< 16#7fffffff -> int32;
+       I =< 16#ffffffff -> uint32
+    end.
+
 type_integer(I) when is_integer(I) ->
     if I >= -4, I =< 3 -> int3;
        I >= -16#80, I =< 16#7f -> int8;
@@ -1047,7 +1047,7 @@ opcode_length({array,EType,Es}) ->
     N = length(Es),
     VL = variant_length(EType),
     Size = 1+N*VL,  %% Size is byte size for all element + type
-    SType = type_integer(Size),  %% type for encoding length (Size)
+    SType = type_integer8(Size),  %% type for encoding length (Size)
     ArgLen = variant_length(SType),
     1+ArgLen+Size;
 
@@ -1154,10 +1154,7 @@ encode_opcodes_([{array,EType,Es}|Code],Acc,Map) ->
     N = length(Es),
     VL = variant_length(EType),
     Size = 1+N*VL,
-    VType = case type_integer(Size) of
-		int3 -> int8;  %% int3 is not available for opcode1
-		T -> T
-	    end,
+    VType = type_integer8(Size),
     VC = variant_code(VType),  %% length varient code
     %% encode element type
     ET = encode_element_type(EType),
