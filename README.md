@@ -61,11 +61,11 @@ stack before rot and a is top of stack after rot
 | jmp       | (  -- )             |                    |
 | call      | ( -- )              |                    |
 | literal   | ( -- n )            |                    |
-| arg <i>   | ( -- a )            | a = frame[i]       |
+| get <i>   | ( -- a )            | a = frame[i]       |
 | array <n> | ( -- caddr )        |                    |
-| fenter    | ( a b c -- )        | set new fp         |
-| fleave    | ( a b c -- a b c )  | restore old frame  |
-| fset <i>  | ( a -- )            | frame[i]=a         |
+| enter     | ( a b c -- )        | set new fp         |
+| leave     | ( a b c -- a b c )  | restore old frame  |
+| set <i>   | ( a -- )            | frame[i]=a         |
 
 ## compiler built-ins min,max,abs ...
 
@@ -421,8 +421,8 @@ is the magic 32 bit word that is used to recognise chine binary code.
 Following the magic word is a small header
 
     Version:32     file version
-    Crc:32         crc-32 over all data (while Crc was set to zero)
-    Length:32      content length in number of bytes
+    Crc:32/little         crc-32 over all data (while Crc was set to zero)
+    Length:32/little      content length in number of bytes
 
 Length cover the rest of the sections including the crc-32.
 The Crc is calculated over all data with Crc field set to zero.
@@ -430,7 +430,7 @@ The Crc is calculated over all data with Crc field set to zero.
 symbol table section
 
     'S','Y','M','B',
-	Length:32,
+	Length:32/little,
 
 Each entry in the symbol sections, looks like
 
@@ -439,4 +439,4 @@ Each entry in the symbol sections, looks like
 The code follows the SYMB section in a section called CODE
 
 	'C','O','D','E',
-	Length:32
+	Length:32/little
