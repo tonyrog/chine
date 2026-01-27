@@ -169,9 +169,9 @@ uint8_t* file_header(uint8_t* ptr, uint8_t** symb_end)
     if ((ptr[0] != FILE_VERSION_MAJOR) || (ptr[1] != FILE_VERSION_MINOR) )
 	return NULL;
     ptr += 4;
-    crc = UINT32(ptr);
+    crc = chine_read_mem_u32(ptr);
     ptr += 4;
-    length = UINT32(ptr);
+    length = chine_read_mem_u32(ptr);
     ptr += 4;
 
     // printf("crc=%u, length=%d\n", crc, length);
@@ -190,7 +190,7 @@ uint8_t* file_header(uint8_t* ptr, uint8_t** symb_end)
     if (str_cmp((const char*) ptr, "SYMB", 4) != 0)
 	return NULL;
     ptr += 4;
-    symblen = UINT32(ptr);
+    symblen = chine_read_mem_u32(ptr);
     ptr += 4;
     *symb_end = (ptr + symblen);
     return ptr;
@@ -205,7 +205,7 @@ uint8_t* code_section(uint8_t* symb_end, uint8_t** code_end)
     if (str_cmp((const char *)ptr, "CODE", 4) != 0)
 	return NULL;
     ptr += 4;
-    code_len = UINT32(ptr);
+    code_len = chine_read_mem_u32(ptr);
     ptr += 4;
     *code_end = ptr + code_len;
     return ptr;
@@ -231,9 +231,9 @@ int lookup(uint8_t* symb_start, uint8_t* symb_end, char* symbol)
 				       (const char*) sptr, sn) == 0)) {
 	    int offset;
 	    switch(vn) {
-	    case 1: offset = INT8(vptr); break;
-	    case 2: offset = INT16(vptr); break;
-	    case 4: offset = INT32(vptr); break;
+	    case 1: offset = chine_read_mem_i8(vptr); break;
+	    case 2: offset = chine_read_mem_i16(vptr); break;
+	    case 4: offset = chine_read_mem_i32(vptr); break;
 	    default: return -1;
 	    }
 	    TRACEF("symbol %.*s offset %d\n", sn, sptr, offset);
@@ -315,6 +315,7 @@ int main(int argc, char** argv)
     uint8_t* symb_end;
     uint8_t* code_start;
     uint8_t* code_end;
+    size_t code_len;
     off_t offset;
     int i = 1;
 
@@ -378,7 +379,8 @@ int main(int argc, char** argv)
     if ((code_start = code_section(symb_end, &code_end)) == NULL)
 	error("code section not found", "");
 
-    chine_init(&m, (uint8_t*)code_start, chine_unix_sys);
+    code_len = code_end - code_start;
+    chine_init(&m, (uint8_t*)code_start, code_len, chine_unix_sys);
 
     if ((offset = lookup(symb_start, symb_end, "init")) >= 0) {
 	chine_set_ip(&m, offset);

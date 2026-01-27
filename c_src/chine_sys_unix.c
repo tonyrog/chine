@@ -102,13 +102,20 @@ static int store(uint16_t index, uint8_t si,int32_t value)
     return 0;
 }
 
-
-// op1 only
-void* get_const_array(chine_t* mp, cell_t offs)
+// get string pointer {array, uint8, "hello world"}
+void* get_const_array(chine_t* mp, cell_t aptr)
 {
-    uint8_t* aptr = mp->prog + offs;  // get array address
-    if ((*aptr & 0x0f) != ARRAY) return NULL;
-    return (void*)(aptr+get_arg_len(*aptr)+1);
+    uint8_t L;
+    uint8_t B = vm_read_u8(mp, aptr);
+    if ((B & OP1MASK) != ARRAY) return 0;
+    L = (1 << OP1VAL(B));        // number of bytes for A
+    aptr += (1+L);
+    B = vm_read_u8(mp, aptr);    // type
+    if ((B & 0x03) != 0) return 0;  // 8-bit = 0
+    // if ((B & 0x80) != 0) return 0;  // require unsigned?
+    aptr++;                      // start of array
+    // fixme: read byte count and check...?
+    return vm_translate(mp, aptr, PAGE_READ, 0);
 }
 
 //

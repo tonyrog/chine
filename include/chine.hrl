@@ -3,6 +3,31 @@
 
 -define(FILE_VERSION, 16#01010000).
 
+%% memory addresses 32-bit
+-define(PAGE0_ADDR, 16#00000000).
+-define(PAGE1_ADDR, 16#20000000).
+-define(PAGE2_ADDR, 16#40000000).
+-define(PAGE3_ADDR, 16#60000000).
+-define(PAGE4_ADDR, 16#80000000).
+-define(PAGE5_ADDR, 16#A0000000).
+-define(PAGE6_ADDR, 16#C0000000).
+-define(PAGE7_ADDR, 16#E0000000).
+
+-define(ZERO_START, ?PAGE0_ADDR).
+-define(CODE_START, ?PAGE1_ADDR).
+-define(RAM_START,  ?PAGE4_ADDR).
+
+-define(MAX_ARGS,    255).
+-define(MAX_RETURNS, 15).
+-define(MAX_LOCALS,  65535).
+-define(CELL_SIZE,   4).  %% 32-bit
+
+-define(RAM_CELL(I), (?RAM_START+I*?CELL_SIZE)).
+-define(DP,  ?RAM_CELL(0)).
+-define(TIB, ?RAM_CELL(1)).
+-define(IN,  ?RAM_CELL(2)).
+-define(TIB_SIZE, 81).
+
 -define(OPCODE0(OP),     <<0:2, (OP):6>>).
 %% L = 0 (1 byte arg) 1 = (2 byte arg)  2 = (4 bytes arg)
 -define(OPCODE1(JOP,L),  <<1:2, (L):2, (JOP):4>>).
@@ -24,13 +49,13 @@
 	 jmp,
 	 call,
 	 literal,
-	 jop_7,
+	 '_jop_7',
 	 %% OPCODE1 only
-	 arg,     %% 8  get element in stack frame
+	 get,     %% 8  get element in stack frame
 	 array,   %% 9
-	 fenter,  %% 10 enter stack frame
-	 fleave,  %% 11 leave stack frame
-	 fset,    %% 12 set element in stack frame
+	 enter,   %% 10 enter stack frame
+	 leave,   %% 11 leave stack frame
+	 set,     %% 12 set element in stack frame
 	 jop_13,
 	 jop_14,
 	 jop_15
@@ -52,7 +77,7 @@
 	 '-',
 	 '+',
 	 '*',
-	 %% op6
+	 %% -----
 	 'nop',
 	 'and',
 	 'or',

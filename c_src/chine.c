@@ -11,18 +11,102 @@
 
 #include "chine.h"
 
+void chine_fault(cell_t vaddr)
+{
+    printf("chine address fault addr = %x\n", vaddr);
+    exit(1);
+}
+
+// VM -> host (t.ex. för syscall-parametrar)
+void vm_copy_out(chine_t* mp, void* dst, uint32_t vaddr, size_t len)
+{
+    uint8_t* host_dst = (uint8_t*)dst;
+    
+    while (len--) {
+        *host_dst++ = vm_read_u8(mp, vaddr++);
+    }
+}
+
+// host -> VM (t.ex. resultat från syscall)
+void vm_copy_in(chine_t* mp, uint32_t vaddr, const void* src, size_t len)
+{
+    const uint8_t* host_src = (const uint8_t*)src;
+    
+    while (len--) {
+        vm_write_u8(mp, vaddr++, *host_src++);
+    }
+}    
+    
+
+cell_t vm_read_signed(chine_t* mp, uint8_t L, vaddr_t addr)
+{
+    switch(L) {
+    case 1: return vm_read_i8(mp, addr);
+    case 2: return vm_read_i16(mp, addr);
+    case 4: return vm_read_i32(mp, addr);
+    default: chine_fault(addr); return 0;
+    }
+}
+
+cell_t vm_read_unsigned(chine_t* mp, uint8_t L, vaddr_t addr)
+{
+    switch(L) {
+    case 1: return vm_read_u8(mp, addr);
+    case 2: return vm_read_u16(mp, addr);
+    case 4: return vm_read_u32(mp, addr);
+    default: chine_fault(addr); return 0;
+    }
+}
+
+cell_t vm_read_element(chine_t* mp, uint8_t n, vaddr_t addr, int i)
+{
+    switch(n) {
+    case 1: return vm_read_u8(mp, addr + i);
+    case 2: return vm_read_u16(mp, addr + 2*i);
+    case 4: return vm_read_u32(mp, addr + 4*i);
+    default: return 0; // error! fault
+    }
+}
+
 // Initialize machine
-void chine_init(chine_t* mp, uint8_t* prog,
+void chine_init(chine_t* mp, uint8_t* prog, size_t prog_size,
 		int (*sys)(chine_t* mp,
 			   cell_t sysop, cell_t* revarg,
 			   cell_t* npop, cell_t* reason))
 {
     int i;
-    
-    mp->prog = prog;
-    mp->stack = mp->mem + MAX_MEM;
+
+    // PAGE0 = 0x00000000 (000_)
+    memset(mp->page, 0x00, sizeof(mp->page));
+
+    // page 0 is blank - not used right now
+
+    // PAGE1 = 0x20000000 (001_)
+#ifdef __AVR__
+    // fixme: set phy = 0, and require prog to be in PAGE1
+    mp->page[1].phy = prog;       // program area
+    mp->page[1].size = prog_size; // fixme: pass to init as prog_size?
+    mp->page[1].flags = PAGE_READ|PAGE_EXEC|PAGE_PROGMEM;
+#else
+    mp->page[1].phy = prog;       // program area
+    mp->page[1].size = prog_size; // fixme: pass to init as prog_size?
+    mp->page[1].flags = PAGE_READ|PAGE_EXEC;
+#endif
+    printf("page 1 = phy=%p, size=%ld\n", prog, prog_size);
+
+    // PAGE2 = 0x40000000 (010_)
+    // PAGE3 = 0x60000000 (011_)
+    // PAGE4 = 0x80000000 (100_)
+    mp->page[4].phy = (uint8_t*) mp->mem;
+    mp->page[4].size = sizeof(mp->mem);
+    mp->page[4].flags = PAGE_READ|PAGE_WRITE|PAGE_EXEC;
+
+    printf("page 4 = phy=%p, size=%ld\n", mp->mem, sizeof(mp->mem));
+    // PAGE5 = 0xA0000000 (101_)
+    // PAGE6 = 0xC0000000 (110_)
+    // PAGE7 = 0xE0000000 (111_)    
     mp->sys  = sys;
-    mp->cIP = NULL;
+    mp->cIP = CODE_PAGE;
     mp->cSP = mp->stack+MAX_STACK-1;  // towards low address (include a dummy)
     mp->cRP = mp->stack;              // towards high address
     mp->cFP = mp->cSP;
@@ -32,14 +116,16 @@ void chine_init(chine_t* mp, uint8_t* prog,
     *mp->cSP = 0xFEEDBABE;            // initial TOS value
     for (i = 0; i < U_MAX_VARS; i++)
 	mp->mem[i] = 0;
-    mp->mem[U_DP] = U_MAX_VARS*sizeof(cell_t);  // point after variable area
+    // dictionary pointer after variable area
+    mp->mem[U_DP] = RAM_PAGE + U_MAX_VARS*sizeof(cell_t); 
     (*sys)(mp, SYS_INIT, NULL, NULL, NULL);
 }
 
 // Set execution pointer
 void chine_set_ip(chine_t* mp, int offset)
 {
-    mp->cIP = mp->prog + offset;
+    // CODE_START is a bit brutal, make better
+    mp->cIP = CODE_PAGE + offset;
 }
 
 // Chine is on toplevel
@@ -183,11 +269,11 @@ static const instr_info_t jop_info[] = {
     [CALL]    = { "call",    0, 0 },
     [LITERAL] = { "literal", 0, 1 },
     [JOP_7]   = { "jop_7",   0, 0 },
-    [ARG]     = { "arg",     0, 1 },  // op1 = 8
+    [GET]     = { "get",     0, 1 },  // op1 = 8
     [ARRAY]   = { "array",   0, 1 },  // op1 = 9
-    [FENTER]  = { "fenter",  0, 0 },  // op1 = 10
-    [FLEAVE]  = { "fleave",  0, 0 },  // op1 = 11
-    [FSET]    = { "fset",    1, 0 },  // op1 = 12
+    [ENTER]   = { "enter",  0, 0 },   // op1 = 10
+    [LEAVE]   = { "leave",  0, 0 },   // op1 = 11
+    [SET]     = { "set",    1, 0 },   // op1 = 12
     [JOP_13]  = { "jop_13",  0, 0 },
     [JOP_14]  = { "jop_14",  0, 0 },
     [JOP_15]  = { "jop_15",  0, 0 },    
@@ -244,8 +330,12 @@ void static trace_begin(chine_t* mp,uint8_t TI,cell_t A,cell_t* sp)
 
     if (!trace)
 	return;
-    // printf("A=%d,", A);
-    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|FENTER))
+    switch(TI >> OPSHFT) {
+    case OP1:
+    case OP2: printf("A=%d,", A);
+    default: break;
+    }
+    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|ENTER))
 	b = A >> 16;
     else {
 	(void) effect_update(TI, &mi, &ma, 0); // d =
@@ -279,7 +369,7 @@ void static trace_end(chine_t* mp,uint8_t TI, cell_t A, cell_t* sp)
     if (!trace)
 	return;
 
-    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|FLEAVE))
+    if ((TI & (OPMASK|OP1MASK)) == (OP1INS|LEAVE))
 	a = A & 0xf; // number of return values
     else {
 	d = effect_update(TI, &mi, &ma, 0);
@@ -322,13 +412,6 @@ static const char* trace_ins(uint8_t ins)
     }
     return insbuf;
 }
-
-// handle trace of case op3
-// trace begin
-// *** trace end
-// *** trace begin
-// trace end
-// 
 
 #define TRACEF(...) if (trace) printf(__VA_ARGS__)
 
@@ -395,46 +478,38 @@ static const char* trace_ins(uint8_t ins)
 	goto next;						\
     } while(0)
 
-static uint8_t* get_array(chine_t* mp, cell_t aoffs)
+static vaddr_t get_array(chine_t* mp, vaddr_t aptr)
 {
-    uint8_t* aptr = mp->prog + aoffs;
-    if ((aptr[0] & OP1MASK) != ARRAY) return NULL;
+    uint8_t I = vm_read_u8(mp, aptr);
+    if ((I & OP1MASK) != ARRAY)
+	return 0;
     return aptr;
 }
 
-static cell_t sizeof_array(uint8_t* aptr)
+static cell_t sizeof_array(chine_t* mp, vaddr_t aptr)
 {
-    cell_t L = get_op1_len(aptr[0]);            // arg len
-    cell_t A = get_signed(L, aptr[0], aptr+1);  // number of bytes
-    int n = aptr[L+1] & 0x3;
+    uint8_t I = vm_read_u8(mp, aptr);
+    cell_t L = (1 << OP1VAL(I));              // arg len
+    cell_t A = vm_read_signed(mp, L, aptr+1); // number of bytes
+    int n = vm_read_u8(mp, aptr+L+1) & 0x3;
     // printf("L=%d,A=%d,n=%d\n", L, A, n);
     return (A-L) >> n;         // L = number of elements    
 }
 
-static cell_t get_element(uint8_t* aptr, cell_t hl, int i)
+static cell_t get_element(chine_t* mp, vaddr_t aptr, cell_t L, int i)
 {
-    int n, s;
-
-    aptr += (1+hl);              // skip past op en A to element type
-    n = aptr[0] & 0x03;          // element byte size = 2^n
-    s = aptr[0] & 0x80;          // element sign
-    aptr++;                      // start of array
-    i = i << n;                  // scale to multiple of element size
-    if (s) {
-	switch(n) {
-	case 0: return INT8(aptr+i);
-	case 1: return INT16(aptr+i);
-	case 2: return INT32(aptr+i);
-	default: return 0; // error?
-	}
+    uint8_t n;
+    uint8_t T;
+    
+    aptr += (1+L);              // skip past op en A to element type
+    T = vm_read_u8(mp, aptr++); // read element type byte
+    n = T & 0x03;               // element byte size = 2^n
+    i = i << n;                 // scale to multiple of element size
+    if (T & 0x80) {
+	return vm_read_signed(mp, 1<<n, aptr+i);
     }
     else {
-	switch(n) {
-	case 0: return UINT8(aptr+i);
-	case 1: return UINT16(aptr+i);
-	case 2: return UINT32(aptr+i);
-	default: return 0; // error?
-	}
+	return vm_read_unsigned(mp, 1<<n, aptr+i);
     }    
 }
 
@@ -442,7 +517,7 @@ static cell_t get_element(uint8_t* aptr, cell_t hl, int i)
 int chine_run(chine_t* mp)
 {
     TOS_DECL;      // top of stack cache (USE_TOS_CACHE)
-    uint8_t* cIP;  // instruction pointer
+    vaddr_t cIP;   // instruction pointer
     cell_t*  cSP;  // stack pointer
     cell_t*  cRP;  // return stack
     cell_t*  cFP;  // frame pointer
@@ -475,16 +550,29 @@ int chine_run(chine_t* mp)
     SWAP_IN(mp);
     
 next:
-    TRACEF("%04u: %s ", (int)(cIP - mp->prog), trace_ins(*cIP));
-    I = *cIP++;
+    TRACEF("%08x: %s ", cIP, trace_ins(vm_read_u8(mp,cIP)));
+    I = vm_read_u8(mp,cIP++);
 #ifdef TRACE
     TI = I;  // save I for use in BEGIN / END
 #endif
     switch((I>>OPSHFT)&3) {     // extract opcode J
-    case 0: J = (I & OP0MASK); break;      // 0x3f (1 << 6)-1
-    case 1: J = (I & OP1MASK); goto jump;  // 0x0f (1 << 4)-1
-    case 2: J = (I & OP2MASK); goto jump;  // 0x07 (1 << 3)-1
-    case 3: J = (I & OP3MASK); break;      // 0x07 (1 << 3)-1
+    case 0:
+	J = (I & OP0MASK);
+	break;
+    case 1:
+	J = (I & OP1MASK);
+	L = (1 << OP1VAL(I));
+	A = vm_read_signed(mp, L, cIP);
+	cIP = cIP + L; // advance beyond argument
+	goto jump;
+    case 2:
+	J = (I & OP2MASK);
+	L = 0;
+	A = OP2VAL(I);
+	goto jump;
+    case 3:
+	J = (I & OP3MASK);
+	break;
     }
 next3:
     // op0 & op3
@@ -626,20 +714,19 @@ next3:
 
     CASE(STORE): {
 	    BEGIN;
-	    A = FST;
+	    cell_t addr = FST;
 	    POP();
-	    if ((A < 0) || (A >= (MAX_MEM+MAX_STACK)))
-		goto L_FAIL_INVALID_MEMORY_ADDRESS;
-	    mp->mem[A] = FST;
+	    // printf("STORE: addr=0x%x value=0x%x\n", addr, FST);
+	    vm_write_aligned_u32(mp, addr, FST);
 	    POP();
 	    END;
 	}
 
     CASE(FETCH): {
 	    BEGIN;
-	    if ((FST < 0) || (FST >= (MAX_MEM+MAX_STACK)))
-		goto L_FAIL_INVALID_MEMORY_ADDRESS;
-	    FST = mp->mem[FST]; 
+	    cell_t addr = FST;	    
+	    FST = vm_read_aligned_u32(mp, addr);
+	    // printf("FETCH: addr=0x%x value=0x%x\n", addr, FST);
 	    END;
 	}
 
@@ -671,7 +758,7 @@ next3:
 		TEND;
 		goto L_FAIL_TERMINATE;
 	    }
-	    cIP = mp->prog + *--cRP;
+	    cIP = *--cRP;
 	    END;
 	}
 
@@ -684,12 +771,11 @@ next3:
 	
     CASE(SYS): {
 	    BEGIN;
-	    cell_t sysop = UINT8(cIP);
+	    cell_t sysop = vm_read_u8(mp,cIP++);
 	    cell_t ret;
 	    cell_t npop;
 	    cell_t value;
 	    
-	    cIP++;
 	    SAVE();
 	    if ((ret = (*mp->sys)(mp, sysop, cSP, &npop, &value)) < 0) {
 		TEND;
@@ -705,25 +791,27 @@ next3:
 
     CASE(SIZE): {
 	    BEGIN;
-	    uint8_t* aptr;	    
-	    if ((aptr = get_array(mp, FST)) == NULL)
+	    vaddr_t aptr;
+	    if ((aptr = get_array(mp, FST)) == 0)
 		goto L_FAIL_INVALID_ARGUMENT;
-	    FST = sizeof_array(aptr);
+	    FST = sizeof_array(mp, aptr);
 	    END;
 	}
 
     CASE(ELEM): {
 	    BEGIN;
-	    uint8_t* aptr;
+	    vaddr_t aptr;
+	    uint8_t B;
 	    int i;
 	    i = FST;             // array index
  	    POP();
-	    if ((aptr = get_array(mp, FST)) == NULL)
+	    if ((aptr = get_array(mp, FST)) == 0)
 		goto L_FAIL_INVALID_ARGUMENT;
-	    L = get_op1_len(aptr[0]);    // number of bytes for A
-	    A = sizeof_array(aptr);      // number of elements
+	    B = vm_read_u8(mp, aptr);
+	    L = (1 << OP1VAL(B));            // number of bytes for A
+	    A = sizeof_array(mp, aptr);      // number of elements
 	    if ((i < 0) || (i > A)) goto L_FAIL_INVALID_ARGUMENT;
-	    FST = get_element(aptr, L, i);
+	    FST = get_element(mp, aptr, L, i);
 	    END;
 	}
 	
@@ -731,8 +819,8 @@ next3:
 	    BEGIN;
 	    // place a call to the location given by addr on top of stack
 	    // the address is a location relative to program start
-	    A = (cIP - mp->prog);  // save return address
-	    cIP = mp->prog + FST;
+	    A = cIP;      // save return address
+	    cIP = FST;
 	    *cRP++ = A;
 	    POP();
 	    END;
@@ -741,55 +829,47 @@ next3:
     CASE(SPFETCH): {
 	    BEGIN;
 	    SAVE();
-	    FST = (cSP - mp->mem);
+	    FST = (cSP - mp->stack);
 	    END;
 	}
 
     CASE(SPSTORE): {
 	    BEGIN;
-	    cSP = (mp->mem + FST);
+	    cSP = (mp->stack + FST);
 	    RESTORE();
 	    END;
 	}		
 
     CASE(FPFETCH): {  // fp@ ( -- fp )
 	    BEGIN;
-	    PUSH(cFP - mp->mem);
+	    PUSH(cFP - mp->stack);
 	    END;
 	}
 
     CASE(FPSTORE): {  // fp! ( fp -- )
 	    BEGIN;
-	    cFP = mp->mem + FST;
+	    cFP = mp->stack + FST;
 	    POP();
 	    END;
 	}
 
-    CASE(CSTORE): {
+    CASE(CSTORE): {  // main RAM from RAM_PAGE
 	    BEGIN;
-	    cell_t i = FST;
-	    if ((i < 0) || (i >= (MAX_MEM+MAX_STACK*sizeof(cell_t))))
-		goto L_FAIL_INVALID_MEMORY_ADDRESS;
+	    uint32_t addr = FST;
 	    POP();
-	    ((uint8_t*)mp->mem)[i] = FST;
+	    vm_write_u8(mp, addr, FST);
 	    POP();
 	    END;
 	}
 
     CASE(CFETCH): {
 	    BEGIN;
-	    cell_t i = FST;
-	    if ((i < 0) || (i >= (MAX_MEM+MAX_STACK*sizeof(cell_t))))
-		goto L_FAIL_INVALID_MEMORY_ADDRESS;
-	    FST = ((uint8_t*)mp->mem)[i];
+	    FST = vm_read_u8(mp, FST);
 	    END;
 	}
     }
     
 jump:  // op1 and op2
-    L = get_arg_len(I);         // number of bytes in A
-    A = get_signed(L, I, cIP);  // the SIGNED argument
-    cIP = cIP + L;              // advance beyond argument
     switch(J) {
     default: goto L_FAIL_INVALID_OPCODE;
     CASE(JMPZ): {
@@ -833,14 +913,15 @@ jump:  // op1 and op2
 
     CASE(CALL): {
 	    BEGIN;
-	    *cRP++ = (cIP - mp->prog);
+	    *cRP++ = cIP;
 	    cIP += A;
 	    END;
 	}
+	
     CASE(ARRAY): {
 	    // push array pointer on stack and skip
 	    BEGIN;
-	    cell_t offs = (cIP-L-1) - mp->prog;
+	    cell_t offs = (cIP-L-1);
 	    // printf("array: offs = %d, [ip]=%d\r\n", offs, *(cIP-L-1));
 	    PUSH(offs);
 	    cIP = cIP + A;
@@ -853,12 +934,12 @@ jump:  // op1 and op2
 	    END;
 	}
 
-    CASE(FENTER): {  // A = <<nargs:8,nlocals:16>>
+    CASE(ENTER): {  // A = <<nargs:8,nlocals:16>>
 	    // 'fenter' => ['fp@','>r','sp@','fp!'],
 	    BEGIN;
 	    cell_t L = A & 0xffff;     // locals
 	    // check arg?
-	    *cRP++ = (cFP - mp->mem);  // save old fp on return stack
+	    *cRP++ = (cFP - mp->stack);  // save old fp on return stack
 	    SAVE();
 	    cFP = cSP;                 // set new fp
 	    // clear locals
@@ -873,31 +954,31 @@ jump:  // op1 and op2
 	    END;
 	}
 	
-    CASE(FLEAVE): { // A = <<nargs:8,nret:4>>
-	    // 'fleave' => ['fp@','r>','fp!','sp!'],
+    CASE(LEAVE): { // A = <<nargs:8,nret:4>>
+	    // 'leave' => ['fp@','r>','fp!','sp!'],
 	    BEGIN;
 	    cell_t R = A & 0xf;     // number of return values
 	    cell_t N = A >> 4;      // N is number of arguments
-	    cell_t FP0 = cFP - mp->mem;  // save furrent = fp@
+	    cell_t FP0 = cFP - mp->stack;  // save furrent = fp@
 	    cell_t* SP0;
 	    SAVE();
 	    SP0 = cSP + R;
-	    cFP = mp->mem + *--cRP;      // restore fp
-	    cSP = (mp->mem + FP0 + N); // restore sp + remove args
+	    cFP = mp->stack + *--cRP;      // restore fp
+	    cSP = (mp->stack + FP0 + N); // restore sp + remove args
 	    while(R--)
 		*--cSP = *--SP0;
 	    RESTORE();
 	    END;
 	}
 
-    CASE(FSET): {  // A = index in Fp
+    CASE(SET): {  // A = index in Fp
 	    BEGIN;
 	    cFP[A] = FST;
 	    POP();
 	    END;
 	}
 
-    CASE(ARG): {
+    CASE(GET): {
 	    BEGIN;
 	    PUSH(cFP[A]);
 	    END;
@@ -912,8 +993,8 @@ L_FAIL_INVALID_OPCODE:
     fail(FAIL_INVALID_OPCODE);
 L_FAIL_DIV_ZERO:
     fail(FAIL_DIV_ZERO);
-L_FAIL_INVALID_MEMORY_ADDRESS:
-    fail(FAIL_INVALID_MEMORY_ADDRESS);
+// L_FAIL_INVALID_MEMORY_ADDRESS:
+//     fail(FAIL_INVALID_MEMORY_ADDRESS);
 L_FAIL_INVALID_ARGUMENT:
     fail(FAIL_INVALID_ARGUMENT);
 L_FAIL_TERMINATE:

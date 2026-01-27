@@ -286,15 +286,15 @@ file_sections(SymbolTable,CRC,Content) ->
     ContentLen = byte_size(Content),
     Length = 4 + 4 + SymbolTableLen + 4 + 4 + ContentLen,
     {[$C,$H,$I,$N,
-     <<?FILE_VERSION:32>>,
-     <<CRC:32>>,
-     <<Length:32>>,
-     $S,$Y,$M,$B,
-     <<SymbolTableLen:32>>,
-     SymbolTable,
-     $C,$O,$D,$E,
-     <<ContentLen:32>>,
-     Content], Length}.
+      <<?FILE_VERSION:32>>,  %% big-endian
+      <<CRC:32/little>>,
+      <<Length:32/little>>,
+      $S,$Y,$M,$B,
+      <<SymbolTableLen:32/little>>,
+      SymbolTable,
+      $C,$O,$D,$E,
+      <<ContentLen:32/little>>,
+      Content], Length}.
 
 symbol_table(Symbols, Labels) ->
     %% io:format("Symbols = ~p, labels = ~p\n",[Symbols, Labels]),
@@ -311,8 +311,8 @@ symbol_table(Symbols, Labels) ->
       end, [], [L || {{export,L},_} <- maps:to_list(Symbols)]).
 
 encode_symbol_value(Value) when Value >= 0 ->
-    if Value < -16#8000; Value > 16#7fff -> <<Value:32>>;
-       Value < -16#80; Value > 16#7f ->  <<Value:16>>;
+    if Value < -16#8000; Value > 16#7fff -> <<Value:32/little>>;
+       Value < -16#80; Value > 16#7f ->  <<Value:16/little>>;
        true -> <<Value:8>>
     end.
 
@@ -346,6 +346,10 @@ collect_exports_([], Acc, Sym) ->
 
 normalize_label(L) when is_atom(L) ->
     atom_to_list(L);
+normalize_label({Ctx,L}) when is_atom(Ctx),is_atom(L) ->
+    normalize_label(atom_to_list(Ctx)++"."++atom_to_list(L));
+normalize_label({Ctx,L}) when is_atom(Ctx),is_list(L) ->
+    normalize_label(atom_to_list(Ctx)++"."++L);
 normalize_label(L) when is_list(L) ->
     try iolist_size(L) of
 	Len when Len < 256 -> L;
@@ -391,13 +395,13 @@ opcode_type({Op,Arg},_Sym) when is_atom(Op) ->
 	jmp   -> jop;
 	call  -> jop;
 	literal when is_integer(Arg) -> data;
-	arg when is_integer(Arg) -> frame;
+	get when is_integer(Arg) -> frame;
 	array when is_list(Arg) -> data;
 	string when is_list(Arg) -> data;
 	string when is_binary(Arg) -> data;
-	fenter when is_integer(Arg) -> frame;
-	fleave when is_integer(Arg) -> frame;
-	fset  when is_integer(Arg) -> frame;
+	enter when is_integer(Arg) -> frame;
+	leave when is_integer(Arg) -> frame;
+	set  when is_integer(Arg) -> frame;
 	_ -> none
     end;
 opcode_type(_, _) -> none.
@@ -416,13 +420,13 @@ jopcodes() ->
       ?JENUM(jmp),
       ?JENUM(call),
       ?JENUM(literal),
-      ?JENUM(jop_7),
+      ?JENUM('_jop_7'),
       %% opcode1
-      ?JENUM(arg),
+      ?JENUM(get),
       ?JENUM(array),
-      ?JENUM(fenter),
-      ?JENUM(fleave),
-      ?JENUM(fset),
+      ?JENUM(enter),
+      ?JENUM(leave),
+      ?JENUM(set),
       ?JENUM(jop_13),
       ?JENUM(jop_14),
       ?JENUM(jop_15)
@@ -858,18 +862,18 @@ encode_const_([C|Code], Acc) when is_integer(C) ->
 %%encode_const_([{const,C}|Code], Acc) ->
 %%    L = encode_literal(C),
 %%    encode_const_(Code, [L|Acc]);
-encode_const_([{arg,I}|Code], Acc) ->
+encode_const_([{get,I}|Code], Acc) ->
     Type = type_integer8(I),
-    encode_const_(Code, [{arg,Type,I}|Acc]);
-encode_const_([{fenter,I}|Code], Acc) ->
+    encode_const_(Code, [{get,Type,I}|Acc]);
+encode_const_([{enter,I}|Code], Acc) ->
     Type = type_integer8(I),
-	       encode_const_(Code, [{fenter,Type,I}|Acc]);
-encode_const_([{fleave,I}|Code], Acc) ->
+    encode_const_(Code, [{enter,Type,I}|Acc]);
+encode_const_([{leave,I}|Code], Acc) ->
     Type = type_integer8(I),
-    encode_const_(Code, [{fleave,Type,I}|Acc]);
-encode_const_([{fset,I}|Code], Acc) ->
+    encode_const_(Code, [{leave,Type,I}|Acc]);
+encode_const_([{set,I}|Code], Acc) ->
     Type = type_integer8(I),
-    encode_const_(Code, [{fset,Type,I}|Acc]);
+    encode_const_(Code, [{set,Type,I}|Acc]);
 
 encode_const_([{caddr,L}|Code], Acc) ->
     encode_const_(Code, [{caddr,L}|Acc]);
@@ -1052,22 +1056,21 @@ opcode_length({array,EType,Es}) ->
     1+ArgLen+Size;
 
 %% opcode1 only no int3 encoding
-opcode_length({arg,int8,_X}) -> 2;
-opcode_length({arg,int16,_X}) -> 3;
-opcode_length({arg,int32,_X}) -> 5;
+opcode_length({get,int8,_X}) -> 2;
+opcode_length({get,int16,_X}) -> 3;
+opcode_length({get,int32,_X}) -> 5;
 
-opcode_length({fenter,int8,_X}) -> 2;
-opcode_length({fenter,int16,_X}) -> 3;
-opcode_length({fenter,int32,_X}) -> 5;
+opcode_length({enter,int8,_X}) -> 2;
+opcode_length({enter,int16,_X}) -> 3;
+opcode_length({enter,int32,_X}) -> 5;
 
-opcode_length({fleave,int8,_X}) -> 2;
-opcode_length({fleave,int16,_X}) -> 3;
-opcode_length({fleave,int32,_X}) -> 5;
+opcode_length({leave,int8,_X}) -> 2;
+opcode_length({leave,int16,_X}) -> 3;
+opcode_length({leave,int32,_X}) -> 5;
 
-opcode_length({fset,int8,_X}) -> 2;
-opcode_length({fset,int16,_X}) -> 3;
-opcode_length({fset,int32,_X}) -> 5;
-
+opcode_length({set,int8,_X}) -> 2;
+opcode_length({set,int16,_X}) -> 3;
+opcode_length({set,int32,_X}) -> 5;
 
 opcode_length({caddr,uint3,_L})  -> 1;
 opcode_length({caddr,uint8,_L})  -> 2;
@@ -1106,35 +1109,35 @@ encode_opcodes_([{literal,Kv,I}|Code], Acc, Map) ->
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
 %% arg is OPCODE1 only!
-%%encode_opcodes_([{arg,int3,I}|Code], Acc, Map) ->
+%%encode_opcodes_([{get,int3,I}|Code], Acc, Map) ->
 %%    OP = ?OPCODE1(?JOP(arg),I),
 %%    encode_opcodes_(Code,[OP|Acc],Map);
-encode_opcodes_([{arg,Kv,I}|Code], Acc, Map) ->
+encode_opcodes_([{get,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
-    OP = ?OPCODE1(?JOP(arg),Kc),
+    OP = ?OPCODE1(?JOP(get),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
-encode_opcodes_([{fenter,Kv,I}|Code], Acc, Map) ->
+encode_opcodes_([{enter,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
-    OP = ?OPCODE1(?JOP(fenter),Kc),
+    OP = ?OPCODE1(?JOP(enter),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
-encode_opcodes_([{fleave,Kv,I}|Code], Acc, Map) ->
+encode_opcodes_([{leave,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
-    OP = ?OPCODE1(?JOP(fleave),Kc),
+    OP = ?OPCODE1(?JOP(leave),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
-encode_opcodes_([{fset,Kv,I}|Code], Acc, Map) ->
+encode_opcodes_([{set,Kv,I}|Code], Acc, Map) ->
     K = variant_length(Kv),
     Kc = variant_code(Kv),
     Is = encode_integer(I,K),
-    OP = ?OPCODE1(?JOP(fset),Kc),
+    OP = ?OPCODE1(?JOP(set),Kc),
     encode_opcodes_(Code,cat(Is,[OP|Acc]),Map);
 
 encode_opcodes_([{{jop,Jmp,int3},I}|Code], Acc, Map) ->
@@ -1222,13 +1225,13 @@ encode_array_element(Value, {int,N}) -> binary_to_list(<<Value:N/signed>>);
 encode_array_element(Value, {uint,N}) -> binary_to_list(<<Value:N/unsigned>>);
 encode_array_element(Value, {float,N}) -> binary_to_list(<<Value:N/float>>);
 %% fixme: caddr
-encode_array_element(Value, caddr) -> binary_to_list(<<Value:16/signed>>).
+encode_array_element(Value, caddr) -> binary_to_list(<<Value:16/little-signed>>).
 
 %% encode offset of K bytes as byte list
 encode_integer(X,1) -> binary_to_list(<<X:8>>);
-encode_integer(X,2) -> binary_to_list(<<X:16>>);
-encode_integer(X,4) -> binary_to_list(<<X:32>>);
-encode_integer(X,8) -> binary_to_list(<<X:64>>).
+encode_integer(X,2) -> binary_to_list(<<X:16/little>>);
+encode_integer(X,4) -> binary_to_list(<<X:32/little>>);
+encode_integer(X,8) -> binary_to_list(<<X:64/little>>).
 
 %% cat a list 
 cat([I|Is], Acc) ->

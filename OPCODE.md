@@ -71,8 +71,9 @@ The jjjj (jump) opcodes are
     literal  6  <integer>
              7  unassigned
     arg      8  <index>
-    array    9  <length> <satteeee> <align> <element1> .. <elementn>
-             10-15	unassigned
+    array    9  <length> <sauteeee> <align> <element1> .. <elementn>
+    data     10 <length> bytes ...
+             11-15	unassigned
 
 ## array encoding
 
@@ -95,7 +96,14 @@ including the element-size-type byte and possible alignment pad.
     0 = INTEGER
     1 = FLOAT
     ...    
-    
+
+## data encoding
+
+<length> is the length over all bytes in the data section,
+the operation will push a pointer to the first byte in the
+data section, this could be an array with data, or instructions
+of anything.
+
 ## opcode 10aaajjj
 
 This group uses the three middle bits "aaa" as a

@@ -13,9 +13,7 @@
 
 -define(PROG, "chine").
 
--define(MAX_ARGS,    255).
--define(MAX_RETURNS, 15).
--define(MAX_LOCALS,  65535).
+-include("../include/chine.hrl").
 
 file(Filename) ->
     case file:consult(Filename) of
@@ -35,7 +33,11 @@ file(Filename) ->
 %% function
 
 module(Code) ->
-    module_(Code,[],#{}).
+    Sym = #{ {symbol,'$DP'} => ?DP,
+	     {symbol,'$TIB'} => ?TIB,
+	     {symbol,'$IN'} => ?IN,
+	     {symbol,'TIB_SIZE'} =>  ?TIB_SIZE},
+    module_(Code,[],Sym).
 
 module_([{define,Name,Value}|Code],Acc,Sym) ->
     module_(Code,Acc,maps:put({symbol,Name},Value,Sym));
@@ -45,7 +47,7 @@ module_([{enum,Ls}|Code],Acc,Sym) ->
 module_([{comment,_Comment}|Code],Acc,Sym) ->
     module_(Code, Acc, Sym);
 module_([{export,L}|Code],Acc,Sym) ->
-    module_(Code, [{export,L}|Acc], Sym);
+    module_(Code, [{export,L}|Acc], Sym#{ {export,L} => true });
 module_([{def, Name, Body}|Code], Acc, Sym) ->
     Sym1 = add_block(Sym, Name),
     {Stmts,_Sym2} = code(Body, Sym1),
@@ -72,7 +74,7 @@ module_([{function,Returns,Name,Args,Locals,Body}|Code], Acc, Sym) ->
 		     Sy#{ {symbol,Var} => -I }
 	     end, Sym2, lists:zip(Locals, lists:seq(1, L))),
     {Stmts,_Sym4} = code(Body, Sym3),
-    Func = [{label,Name},{fenter,AL}] ++ Stmts ++ [{fleave,AR},exit],
+    Func = [{label,Name},{enter,AL}] ++ Stmts ++ [{leave,AR},exit],
     %% reverse Func?
     module_(Code, [Func|Acc], Sym1);
 module_([{import, File}|Code],Acc,Sym) ->
@@ -104,9 +106,6 @@ code_([{enum,Ls}|Code],Acc,Sym) ->
     %% local enums inside def/functions
     Sym1 = chine:add_enums(Ls, Sym),
     code_(Code, Acc, Sym1);
-code_([{label,L}|Code],Acc,Sym) ->
-    %% labels should created locally inside def/function
-    code_(Code,[{label,L}|Acc],Sym);
 code_([Literal|Code],Acc,Sym) when is_integer(Literal) ->
     code_(Code,[Literal|Acc],Sym);
 code_([{'_if',Then}|Code],Acc,Sym) ->
@@ -193,7 +192,7 @@ stmnt_({op, ':=', Name, Expr}, Sym) when is_atom(Name) ->
     {Code1,Sym1} = code(Expr,Sym),
     case maps:find({symbol,Name}, Sym) of
 	{ok,I} when is_integer(I) ->
-	    {Code1++[{fset,I}],Sym1};
+	    {Code1++[{set,I}],Sym1};
 	error ->
 	    io:format(standard_error, "error: symbol ~p not defined\n",[Name]),
 	    {[],Sym}
@@ -204,7 +203,7 @@ stmnt_({op, ':=', Ns, Expr}, Sym) when is_list(Ns), is_atom(hd(Ns)) ->
 	       fun(Name, Acc) ->
 		       case maps:find({symbol,Name}, Sym) of
 			   {ok,I} ->
-			       [{fset,I}|Acc];
+			       [{set,I}|Acc];
 			   error ->
 			       io:format(standard_error, 
 					 "error: symbol ~p not defined\n",
@@ -215,7 +214,14 @@ stmnt_({op, ':=', Ns, Expr}, Sym) when is_list(Ns), is_atom(hd(Ns)) ->
     {Code1++Assign, Sym1};
 
 stmnt_({label,L},Sym) ->
-    {[{label,L}],Sym};
+    case maps:find({export,L}, Sym) of
+	{ok,true} ->
+	    {[{label,L}],Sym};
+	error ->
+	    Context = maps:get(context,Sym),
+	    L1 = {Context,L},
+	    {[{label,L1}],Sym#{ {label,L} => L1 }}
+    end;
 stmnt_({op,Op,Arg1,Arg2},Sym) ->
     code([Arg1,Arg2,Op], Sym);
 stmnt_({op,Op,Arg1},Sym) ->
@@ -225,7 +231,7 @@ stmnt_(Op,Sym) ->
 	call when is_atom(Op) ->
 	    case maps:find({symbol,Op}, Sym) of
 		{ok,I} ->
-		    {[{arg,I}],Sym};
+		    {[{get,I}],Sym};
 		error ->
 		    case maps:find(Op, synthetic_opcodes()) of
 			{ok,Code} ->
@@ -239,6 +245,21 @@ stmnt_(Op,Sym) ->
 	    io:format(standard_error,
 		      "opcode ~p is not known\n", [Op]),
 	    error({unknown_op, Op});
+	jop ->
+	    {Jmp, L} = Op,
+	    case maps:find({label,L}, Sym) of
+		{ok, L1} ->
+		    {[{Jmp,L1}], Sym};
+		error ->
+		    case maps:find({export,L}, Sym) of		    
+			{ok,true} ->
+			    {[Op],Sym};
+			error ->
+			    Context = maps:get(context,Sym),
+			    L1 = {Context,L},
+			    {[{Jmp,L1}],Sym#{ {label,L} => L1 }}
+		    end
+	    end;
 	_Type ->
 	    {[Op],Sym}
     end.
@@ -324,6 +345,6 @@ synthetic_opcodes() ->
       'jmp*'  => ['>r', exit],  %% ( caddr -- )
       ';'     => [exit],
       'alloc'  => ['sp@',swap,'-','sp!'],
-      'here'   => [ 0, '@' ],
-      'comma' => [here, swap, over, 'c!', '1+', 0, '!' ]
+      'here'   => [ ?DP, '@' ],
+      'comma' => [here, swap, over, 'c!', '1+', ?DP, '!' ]
 }.

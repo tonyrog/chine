@@ -46,8 +46,9 @@ stack before rot and a is top of stack after rot
 | fp!       | ( fp -- )    | set frame pointer
 | sp@       | ( -- sp )    | fetch stack pointer
 | sp!       | ( sp -- )    | set stack pointer
-| c!        | ( n i -- ) | ((byte*)mem)[i] = n |
-| c@        | ( i -- n ) | n = ((byte*)mem)[i] |
+| c!        | ( n i -- )   | ((byte*)mem)[i] = n |
+| c@        | ( i -- n )   | n = ((byte*)mem)[i] |
+| size      | ( caddr -- n ) | number of array elements |
 
 ## INSTRUCTIONS jop
 
@@ -60,13 +61,11 @@ stack before rot and a is top of stack after rot
 | jmp       | (  -- )             |                    |
 | call      | ( -- )              |                    |
 | literal   | ( -- n )            |                    |
-| array     | ( -- caddr )        |                    |
-
-Extended instructions
-
-| opname    |  stack effect       | comment             |
-|-----------|---------------------|---------------------|
-| arg <i>   | ( -- ai )           |  push relative fp   |
+| arg <i>   | ( -- a )            | a = frame[i]       |
+| array <n> | ( -- caddr )        |                    |
+| fenter    | ( a b c -- )        | set new fp         |
+| fleave    | ( a b c -- a b c )  | restore old frame  |
+| fset <i>  | ( a -- )            | frame[i]=a         |
 
 ## compiler built-ins min,max,abs ...
 

@@ -20,6 +20,7 @@
 {def, bench, 
  [
   {label,bench_loop},
+%%  dup, println,
   12, factorial, drop,
   '1-',
   dup, {jmpnz, bench_loop},

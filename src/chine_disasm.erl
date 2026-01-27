@@ -9,7 +9,7 @@
 
 -export([file/1]).
 -export([show/1]).
-
+-export([code/1]).
 
 -include("../include/chine.hrl").
 
@@ -64,11 +64,11 @@ show_op(Addr, Op, Data, SymTab) ->
     Len = length(Hex0),
     if Len > 8 ->
 	    {Hex1,HexR} = lists:split(8, Hex0),
-	    io:format("~04w: ~-24s ", [Addr,Hex1]),
+	    io:format("~8.16.0B: ~-24s ", [?CODE_START+Addr,Hex1]),
 	    show_opcode(Op),
 	    show_hex(Addr+8, HexR);
        true ->
-	    io:format("~04w: ~-24s ", [Addr,Hex0]),
+	    io:format("~8.16.0B: ~-24s ", [?CODE_START+Addr,Hex0]),
 	    show_opcode(Op)
     end.
 
@@ -97,14 +97,16 @@ format_hex(Bin) ->
 
 hex(X) -> element(X+1,{$0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$a,$b,$c,$d,$e,$f}).
 
-dis(<<"CHIN", FileVersion:32, FileCRC:32, 
-      SectionsLength:32, Sections:SectionsLength/binary, _Trail/binary>>) ->
+dis(<<"CHIN", FileVersion:32, FileCRC:32/little, 
+      SectionsLength:32/little, Sections:SectionsLength/binary,
+      _Trail/binary>>) ->
     File0 = <<"CHIN", FileVersion:32, 0:32, 
-	      SectionsLength:32, Sections/binary>>,
+	      SectionsLength:32/little, Sections/binary>>,
     case erlang:crc32(File0) of
-       FileCRC ->
+	FileCRC ->
 	    Ls = [{Name,Data} || 
-		     <<Name:4/binary, Len:32, Data:Len/binary>> <= Sections],
+		     <<Name:4/binary, Len:32/little, Data:Len/binary>> 
+			 <= Sections],
 	    dis_sections(Ls);
        _ ->
 	    {error, badcrc}
@@ -121,6 +123,9 @@ dis_code([_|Sections], Addr1, SymTab, Code1) ->
     dis_code(Sections, Addr1, SymTab, Code1);
 dis_code([], Addr1, SymTab, Code) ->
     {Addr1,lists:reverse(Code),SymTab}.
+
+code(Bin) when is_binary(Bin) ->
+    dis_opcodes(Bin, 0, #{}, []).
 
 dis_opcodes(<<>>, Addr, _SymTab, Code) ->
     {Addr, lists:reverse(Code)};
@@ -218,7 +223,7 @@ dis_opcodes(<<1:2, EE:2, ?ARRAY:4, Content/binary>>, Addr, SymTab, Code) ->
     {Op, Size, Content1} = dis_array(EE, Content),
     Len = 1+Size,
     dis_opcodes(Content1, Addr+Len, SymTab, [{Addr,Len,Op}|Code]);
-dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/signed-unit:8, Content/binary>>,
+dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/little-signed-unit:8, Content/binary>>,
 	    Addr, SymTab, Code) ->
     Int = case EE of
 	      0 -> int8;
@@ -234,17 +239,17 @@ dis_opcodes(<<1:2, EE:2, JOP:4, A:(1 bsl EE)/signed-unit:8, Content/binary>>,
 	      #jopcode.jmp   -> {jmp,{Int,A}};
 	      #jopcode.call  -> {call,{Int,A}};
 	      #jopcode.literal -> {literal,{Int,A}};
-	      #jopcode.arg     -> {arg,{Int,A}};
-	      #jopcode.fenter  ->
+	      #jopcode.get     -> {get,{Int,A}};
+	      #jopcode.enter  ->
 		  L = A band 16#ffff,
 		  N = A bsr 16,
-		  {fenter,{Int,{N,L}}};
-	      #jopcode.fleave  -> 
+		  {enter,{Int,{N,L}}};
+	      #jopcode.leave  -> 
 		  R = A band 16#f,
 		  N = A bsr 4,
-		  {fleave,{Int,{N,R}}};
-	      #jopcode.fset -> 
-		  {fset,{Int,A}};
+		  {leave,{Int,{N,R}}};
+	      #jopcode.set -> 
+		  {set,{Int,A}};
 	      _ -> {op1,{unknown,JOP}}
 	  end,
     Len = 1+(1 bsl EE),
@@ -291,9 +296,9 @@ dis_opcodes(<<3:2, OP2:3, OP1:3, Content/binary>>, Addr, SymTab, Code) ->
 
 dis_array(0, <<Size:8, Array:Size/binary, Tail/binary>>) ->
     {dis_arr(Array), Size+1, Tail};
-dis_array(1, <<Size:16, Array:Size/binary, Tail/binary>>) ->
+dis_array(1, <<Size:16/little, Array:Size/binary, Tail/binary>>) ->
     {dis_arr(Array), Size+1, Tail};
-dis_array(2, <<Size:32, Array:Size/binary, Tail/binary>>) ->
+dis_array(2, <<Size:32/little, Array:Size/binary, Tail/binary>>) ->
     {dis_arr(Array), Size+1, Tail}.
 %% dis_array(3, <<Size:64, Array:Size/binary, Tail/binary>>) ->
 %%    {dis_arr(Array), Size+1, Tail}.
@@ -308,11 +313,11 @@ dis_arr(<<EType:8, Binary/binary>>) ->
     {array, T, dis_array_elements(T, Binary)}.
 
 dis_array_elements({int,Size}, Binary) ->
-    [I || <<I:Size/signed>> <= Binary];
+    [I || <<I:Size/little-signed>> <= Binary];
 dis_array_elements({uint,Size}, Binary) ->
-    [I || <<I:Size/unsigned>> <= Binary];
+    [I || <<I:Size/little-unsigned>> <= Binary];
 dis_array_elements({float,Size}, Binary) ->
-    [F || <<F:Size/float>> <= Binary].
+    [F || <<F:Size/little-float>> <= Binary].
     
 %% collect all symbols (and merge)
 %% currently the symbols are export entries
@@ -321,7 +326,7 @@ dis_symb([{<<"SYMB">>, Table} | Sections], Symb0) ->
     Symb1 = maps:from_list(
 	      [{Value,Sym} || 
 		  <<SymLen:8, Sym:SymLen/binary,
-		    ValLen:8, Value:ValLen/signed-unit:8>> <= Table]),
+		    ValLen:8, Value:ValLen/little-signed-unit:8>> <= Table]),
     dis_symb(Sections, maps:merge(Symb0, Symb1));
 dis_symb([_ | Sections], Symb) ->
     dis_symb(Sections, Symb);

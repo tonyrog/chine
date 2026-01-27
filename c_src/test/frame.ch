@@ -11,10 +11,10 @@
 
 [
  {label, func},
- fenter,
- {arg,0},{arg,1},'*',{arg,2},'*',
+ enter,
+ {get,0},{get,1},'*',{get,2},'*',
  {call, println},
- fleave,
+ leave,
  exit
 ].
 

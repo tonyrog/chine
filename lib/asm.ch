@@ -3,10 +3,33 @@
 %% opcodes for 2#00 and 2#11 (op0 and op3)
 {enum, [
 	dup, rot, over, drop, swap, '-', '+', '*',
-	'nop', 'and', 'or', 'xor', '0=', '0<', 'not', negate,
+	'nop', 'and', 'or', 'xor', '0=', '0<', 'not', '_op_15', negate,
 	'/', shift, '!', '@', '>r', 'r>', 'r@', exit, sys, yield,
-	'[]', 'execute', 'fp@', 'fp!', 'sp@', 'sp!', 'c!', 'c@']}.
+	'[]', 'execute', 'fp@', 'fp!', 'sp@', 'sp!', 'c!', 'c@', 'size']}.
 
+%% sys calls
+{enum, [
+	sys_init,
+	sys_terminate,
+	sys_now, sys_emit, sys_recv, sys_avail, 
+	sys_param_fetch, sys_param_store, 
+	sys_timer_init, sys_timer_start, sys_timer_stop,
+	sys_timer_timeout, sys_timer_running,
+	sys_input_fetch, 
+	sys_output_store,
+	sys_select_timer,
+	sys_deselect_timer,
+	sys_select_input,
+	sys_deselect_input,
+	sys_deselect_all,
+	sys_uart_connect, sys_uart_send, sys_uart_recv, sys_uart_avail,
+	sys_uart_disconnect,
+	sys_gpio_input, sys_gpio_output, sys_gpio_set, sys_gpio_clr,
+	sys_analog_send, sys_analog_recv,
+	sys_can_connect, sys_can_send, sys_can_recv, sys_can_avail,
+	sys_can_disconnect,
+	sys_file_open, sys_file_write, sys_file_read, sys_file_close,
+	sys_file_seek]}.
 
 %% op0 : ( xxxxxx -- )  ( opcode in range 0-63 )
 %% example: {const,'+'}, op0
@@ -28,9 +51,13 @@
 
 %% opcodes for 2#01 and 2#10 (op1 and op2)
 {enum, [ %% op1/op2 
-	 jmpz, jmpnz, next, jmplz, jmp, call, literal, array,
+	 jmpz, jmpnz, next, jmplz, jmp, call, literal, '_jop_7',
 	 %% op1
-	 arg
+	 get,
+	 array,
+	 enter,
+	 leave,
+	 set
        ]}.
 
 %% op2 : ( aaa jjj -- )  ( aaa in range 0-7, jjj is 3 bit opcode ) 
@@ -69,19 +96,19 @@
   comma          %% -- arg
  ]}.
 
-%% comma2 : ( i16 -- )
+%% comma2 : ( i16 -- ) (little endian!)
 {def, comma2, 
  [
-  dup, -8, shift, comma, comma]}.
+  dup, comma,
+  -8, shift, comma]}.
 
-%% comma4 : ( i32 -- )
+%% comma4 : ( i32 -- ) (little endian!)
 {def, comma4, 
-[ dup, -24, shift, comma,
-  dup, -16, shift, comma,
-  dup, -8, shift, comma,
-  comma]}.
+ [ dup, comma,
+   dup, -8, shift, comma,
+   dup, -16, shift, comma,
+   -24, shift, comma]}.
  
-
 {def, j_dup,   [ {const, dup},  op0 ]}.
 {def, j_rot,   [ {const, rot},  op0 ]}.
 {def, j_over,  [ {const, over}, op0 ]}.
@@ -90,9 +117,36 @@
 {def, 'j_-',   [ {const, '-'},  op0 ]}.
 {def, 'j_+',   [ {const, '+'},  op0 ]}.
 {def, 'j_*',   [ {const, '*'},  op0 ]}.
+{def, 'j_nop', [ {const, 'nop'}, op0 ]}.
+{def, 'j_and', [ {const, 'and'}, op0 ]}.
+{def, 'j_or', [ {const, 'or'}, op0 ]}.
+{def, 'j_xor', [ {const, 'xor'}, op0 ]}.
+{def, 'j_0=', [ {const, '0='}, op0 ]}.
+{def, 'j_0<', [ {const, '0<'}, op0 ]}.
+{def, 'j_not', [ {const, 'not'}, op0 ]}.
+{def, 'j_negate', [ {const, 'negate'}, op0 ]}.
+{def, 'j_/', [ {const, '/'}, op0 ]}.
+{def, 'j_shift', [ {const, 'shift'}, op0 ]}.
+{def, 'j_!', [ {const, '!'}, op0 ]}.
+{def, 'j_@', [ {const, '@'}, op0 ]}.
+{def, 'j_>r', [ {const, '>r'}, op0 ]}.
+{def, 'j_r>', [ {const, 'r>'}, op0 ]}.
+{def, 'j_r@', [ {const, 'r@'}, op0 ]}.
+{def, 'j_exit', [ {const, 'exit'}, op0 ]}.
+{def, 'j_sys', [ {const, 'sys'}, op0 ]}.
+{def, 'j_yield', [ {const, 'yield'}, op0 ]}.
+{def, 'j_[]', [ {const, '[]'}, op0 ]}.
+{def, 'j_execute', [ {const, 'execute'}, op0 ]}.
+{def, 'j_fp@', [ {const, 'fp@'}, op0 ]}.
+{def, 'j_fp!', [ {const, 'fp!'}, op0 ]}.
+{def, 'j_sp@', [ {const, 'sp@'}, op0 ]}.
+{def, 'j_sp!', [ {const, 'sp!'}, op0 ]}.
+{def, 'j_c!', [ {const, 'c!'}, op0 ]}.
+{def, 'j_c@', [ {const, 'c@'}, op0 ]}.
+{def, 'j_size', [ {const, 'size'}, op0 ]}.
 
-{def, j_nop,   [ {const, nop}, op0 ]}.
-
+{def, 'j_literal', [ {const, literal}, op1 ]}.
+{def, 'j_emit',    [ 'j_sys', {const, sys_emit}, comma] }.
 {def, j_short_jmp, [ {const, jmp}, op2 ]}.
 {def, j_long_jmp,  [ {const, jmp}, op1 ]}.
 
@@ -109,6 +163,24 @@
  dup, println,  %% print size
  xdump,
  $\n, emit,
+
+ %% Compile some code and execute
+ %% print "HELLO"
+ here,  %% push current
+ dup, printxln,  %% print dp address in hex
+
+ compile_hello,  %% compile into here
+
+ dup, printxln,         %% ( hello )
+ dup,                   %% ( hello hello )
+
+ dup, here, swap, '-',  %% ( hello hello n )
+ dup, println,          %% print size
+ xdump,                 %% ( hello )
+ $\n, emit,
+
+ dup, printxln,  %% print dp address in hex 
+ execute,        %% run original dp
  terminate]}.
 
 {def, compile,
@@ -125,10 +197,20 @@
  j_dup_swap, $C, emit, $4, emit, $\n, emit, 
  %% 0b10010100 = 0x94
  2, j_short_jmp, $9, emit, $4, emit, $\n, emit,
- %% 0b01010100 = 0x54 0x03 0xE8
+ %% 0b01010100 = 0x54 0xE8 0x03
  1000, j_long_jmp, $X, emit, $\n, emit,
+
  nop
 ]}.
+
+{def, compile_hello,
+ [
+  $H, j_literal, j_emit,
+  $E, j_literal, j_emit,
+  $L, j_literal, j_emit,
+  $L, j_literal, j_emit,
+  $O, j_literal, j_emit,
+  j_exit]}.
 
 %% PRINTLN: ( n -- )
 {def, println,
@@ -144,7 +226,7 @@
  {'_if', [$0,emit,drop,exit]},
  dup, '0<',
  {'_if', [$-,emit,negate]},
- {call,uprint}
+ uprint
 ]}.
 
 %% UPRINT: ( n -- ) n>=0
@@ -158,10 +240,11 @@
   $0,'+',emit
  ]}.
 
-%% c-addr n 
+%% ( c-addr n  -- )
 {def, xdump,
 [
- {'_for', [dup, 'c@', xemit8, $\s, emit, '1+']}
+ {'_for', [dup, 'c@', xemit8, $\s, emit, '1+']},
+ drop
 ]}.
 
 %% xemit8: ( n -- )
@@ -179,4 +262,19 @@
   dup, 9, '>', {'_if', [10, '-', $a, '+', emit, exit]},
   $0, '+', emit
 ]}.
+
+%% PRINTXLN: ( n -- )
+{def, printxln,
+[
+ printx,
+ $\n,emit
+]}.
   
+%% printx: ( n -- )
+{def, printx,
+[
+ dup, -24, shift, xemit8,
+ dup, -16, shift, xemit8,
+ dup, -8, shift, xemit8,
+ xemit8
+]}.
